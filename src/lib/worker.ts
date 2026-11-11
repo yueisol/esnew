@@ -4,7 +4,7 @@ import path from 'node:path';
 import sharp from 'sharp';
 import {all,one,run,transaction,root} from './db';
 import {analyze,edit,vision,reviewSchema} from './openai';
-import {references,planShots,prompt} from './planner';
+import {references,planShots,prompt,reviewInstruction} from './planner';
 import type {Asset,Analysis,Options,Plan} from './schema';
 type Job={id:string;product_id:string;model_id:string;options:string;status:string;snapshot:string};
 type Shot={id:string;job_id:string;plan:string;status:string;image_id:string|null;feedback:string};
@@ -53,7 +53,7 @@ async function review(shot:Shot){
  const refs=references(snapshot.assets);
  const generated=one<Asset>('SELECT * FROM assets WHERE id=?',shot.image_id!)!;
  const prior=all<Asset>("SELECT assets.* FROM shots JOIN assets ON assets.id=shots.image_id WHERE shots.job_id=? AND shots.id<>? AND shots.status='done' LIMIT 2",job.id,shot.id);
- const result=await vision(`Quality check. Compare last generated image against model face/body and garment refs. Other result images are previous shots: check excessive similarity. Check identity/product details, anatomy, mirror physics, product visibility and shot type. Target plan: ${shot.plan}. Give Korean issues. Mark uncertain details as issues.`,[...refs.slice(0,8),...prior,generated],reviewSchema,'quality_review');
+ const result=await vision(reviewInstruction(JSON.parse(shot.plan) as Plan),[...refs.slice(0,8),...prior,generated],reviewSchema,'quality_review');
  run("UPDATE shots SET status='done',review=?,error=NULL WHERE id=?",JSON.stringify(result),shot.id);
  }catch(e){console.error(JSON.stringify({event:'review_failed',shot_id:shot.id,error:message(e)}));run("UPDATE shots SET status='done',review=?,error=NULL WHERE id=?",JSON.stringify({passed:false,issues:['자동 검수 실패: '+message(e)+' 직접 검수해 주세요.']}),shot.id);}
 }

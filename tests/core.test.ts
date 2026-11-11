@@ -1,6 +1,45 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
-import {planShots,prompt,references} from '../src/lib/planner';import {analysisSchema,optionsSchema,type Asset} from '../src/lib/schema';import {retry,ApiError} from '../src/lib/openai';
+import {planShots,prompt,references,reviewInstruction} from '../src/lib/planner';import {analysisSchema,optionsSchema,type Asset} from '../src/lib/schema';import {retry,ApiError} from '../src/lib/openai';
 export const analysis=analysisSchema.parse({category:'TOP',subcategory:'니트',main_color:'블랙',secondary_color:'없음',pattern:'무지',material:'추정 울',texture:'골지',fit:'슬림',silhouette:'일자',neckline:'라운드',shoulder_structure:'기본',sleeve_length:'긴소매',garment_length:'허리',waistline:'일자',hemline:'일자',fastening:'없음',design_details:['골지'],unique_features:[],styling_recommendations:['크림 팬츠','데님'],visual_uncertainties:['혼용률 확인 불가']});
-test('10/11 independent plans with correct distribution and category-aware framing',()=>{for(const count of [10,11] as const){const plans=planShots(analysis,optionsSchema.parse({count}));assert.equal(plans.length,count);assert.equal(new Set(plans.map(p=>p.shot_id)).size,count);assert.equal(plans.filter(p=>p.shot_type==='STUDIO').length,count-8);assert.equal(new Set(plans.map(p=>p.scene+p.pose)).size,count);assert.match(plans[0].framing,/entire top/);assert.match(plans[3].pose,/얼굴 전체 노출/);assert.match(plans[4].pose,/얼굴 전체 노출/);}const lower=planShots({...analysis,category:'BOTTOM'},optionsSchema.parse({}));assert.match(lower[0].framing,/Waist through feet/);});
+test('10/11 independent plans with correct distribution and category-aware framing',()=>{for(const count of [10,11] as const){const plans=planShots(analysis,optionsSchema.parse({count}));assert.equal(plans.length,count);assert.equal(new Set(plans.map(p=>p.shot_id)).size,count);assert.equal(plans.filter(p=>p.shot_type==='STUDIO').length,count-8);assert.equal(new Set(plans.map(p=>p.scene+p.pose)).size,count);assert.match(plans[0].framing,/entire top/i);assert.match(plans[3].pose,/얼굴 전체 노출/);assert.match(plans[4].pose,/얼굴 전체 노출/);}const lower=planShots({...analysis,category:'BOTTOM'},optionsSchema.parse({}));assert.match(lower[0].framing,/Waist through feet/);});
 test('reference selection preserves identity and each product role under cap',()=>{const assets=Array.from({length:30},(_,i)=>({id:String(i),role:i===27?'face':i===28?'mannequin':i===29?'detail':'cutout'})) as Asset[];const refs=references(assets);assert.equal(refs.length,16);assert.equal(refs[0].role,'face');assert.ok(refs.some(a=>a.role==='detail'));const p=prompt({profile:'model',prompt:'same face'},analysis,planShots(analysis,optionsSchema.parse({}))[0],refs);assert.match(p,/Reference 1: face/);assert.match(p,/never a collage/);assert.match(p,/exact count/);});
 test('retry only transient errors, bounded exponential backoff',async()=>{let calls=0;const sleeps:number[]=[];assert.equal(await retry(async()=>{if(++calls<3)throw new ApiError('rate limit',429);return 'ok';},async n=>{sleeps.push(n);}), 'ok');assert.equal(calls,3);assert.ok(sleeps[1]>sleeps[0]);calls=0;await assert.rejects(retry(async()=>{calls++;throw new ApiError('unauthorized',401);},async()=>{}));assert.equal(calls,1);});
+
+test('every category and count includes wide rear view, true profile, full-body mirror and face-free detail crops',()=>{
+ for(const category of ['TOP','BOTTOM','DRESS','OUTER','SET','OTHER'] as const){
+  for(const count of [10,11] as const){
+   const plans=planShots({...analysis,category},optionsSchema.parse({count}));
+   const lifestyle=plans.filter(p=>p.shot_type==='LIFESTYLE');
+   assert.match(lifestyle[0].framing,/50–65%/);
+   assert.match(lifestyle[2].camera_angle,/Rear three-quarter/);
+   assert.match(lifestyle[2].framing,/Entire head and both shoes/);
+   assert.match(lifestyle[2].framing,/face need not be visible/);
+   assert.match(lifestyle[1].camera_angle,/45–60 degrees/);
+   const studio=plans.filter(p=>p.shot_type==='STUDIO');
+   assert.match(studio[1].camera_angle,/90-degree side profile/);
+   if(count===11)assert.match(studio[2].camera_angle,/180 degrees/);
+   const mirror=plans.filter(p=>p.shot_type==='MIRROR');
+   assert.match(mirror[0].framing,/entire head, both feet and both shoes/);
+   for(const detail of plans.filter(p=>p.shot_type==='DETAIL')){
+    assert.match(detail.framing,/entire face and head OUT/);
+    assert.match(detail.framing,/80–95%/);
+    assert.match(detail.framing,/Do NOT show the whole garment/);
+    assert.doesNotMatch(detail.framing,/Show the entire top/);
+    const text=prompt({profile:'same adult model',prompt:'preserve identity'},analysis,detail,[]);
+    assert.match(text,/MANDATORY COMPOSITION/);
+    assert.match(text,/NOT camera framing/);
+    assert.match(reviewInstruction(detail),/not as an error by itself/);
+   }
+  }
+ }
+});
+test('detail focus respects garment category and explicit hairstyle survives composition changes',()=>{
+ const top=planShots(analysis,optionsSchema.parse({hair:'웨이브'}));
+ assert.ok(top.every(p=>p.hairstyle==='웨이브'));
+ const detail=top.filter(p=>p.shot_type==='DETAIL');
+ assert.match(detail[0].framing,/neckline, shoulder seam/);
+ assert.match(detail[1].framing,/fabric weave, sleeve cuff/);
+ const bottom=planShots({...analysis,category:'BOTTOM'},optionsSchema.parse({})).filter(p=>p.shot_type==='DETAIL');
+ assert.match(bottom[0].framing,/waistband, hip/);
+ assert.doesNotMatch(bottom[0].framing,/neckline/);
+});
