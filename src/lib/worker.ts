@@ -40,19 +40,33 @@ async function work(shot:Shot){
  const width=options.ratio==='3:4'?1152:options.ratio==='4:5'?1280:1024,height=options.ratio==='1:1'?1024:options.ratio==='3:4'?1536:1600;
  const output=await sharp(bytes).resize(width,height,{fit:'contain',background:'#f4f3f1',withoutEnlargement:true}).png().toBuffer();
  imageId=randomUUID();const dest=path.join(root,'files',imageId+'.png');await writeFile(dest,output,{mode:0o600});
- transaction(()=>{run('INSERT INTO assets VALUES(?,?,?,?,?,?)',imageId!,job.id,'result','result.png',dest,'image/png');run("UPDATE shots SET image_id=?,status='reviewing',approved=0 WHERE id=?",imageId!,shot.id);});
+ transaction(()=>{run('INSERT INTO assets VALUES(?,?,?,?,?,?)',imageId!,job.id,'result','result.png',dest,'image/png');run("UPDATE shots SET image_id=?,status='review_pending',approved=0 WHERE id=?",imageId!,shot.id);});
  }
- const generated=one<Asset>('SELECT * FROM assets WHERE id=?',imageId!)!;
- const prior=all<Asset>("SELECT assets.* FROM shots JOIN assets ON assets.id=shots.image_id WHERE shots.job_id=? AND shots.id<>? AND shots.status='done' LIMIT 2",job.id,shot.id);
- try{const review=await vision(`Quality check. Compare last generated image against model face/body and garment refs. Other result images are previous shots: check excessive similarity. Check all identity/product details, anatomy, mirror physics, product visibility and shot type. Target plan: ${JSON.stringify(plan)}. Give Korean issues. Automated inspection cannot guarantee identity; mark uncertain details as issues.`,[...refs.slice(0,8),...prior,generated],reviewSchema,'quality_review');run("UPDATE shots SET status='done',review=?,error=NULL WHERE id=?",JSON.stringify(review),shot.id);}
- catch(e){run("UPDATE shots SET status='done',review=?,error=NULL WHERE id=?",JSON.stringify({passed:false,issues:['자동 검수 실패: '+message(e)+' 직접 검수해 주세요.']}),shot.id);}
- }catch(e){run("UPDATE shots SET status='failed',error=? WHERE id=?",message(e),shot.id);}
+ console.info(JSON.stringify({event:'image_saved',shot_id:shot.id}));
+ }catch(e){console.error(JSON.stringify({event:'generation_failed',shot_id:shot.id,error:message(e)}));run("UPDATE shots SET status='failed',error=? WHERE id=?",message(e),shot.id);}
 }
+async function review(shot:Shot){
+ run("UPDATE shots SET status='reviewing' WHERE id=?",shot.id);
+ try{
+ const job=one<Job>('SELECT * FROM jobs WHERE id=?',shot.job_id)!;
+ const snapshot=JSON.parse(job.snapshot) as {assets:Asset[]};
+ const refs=references(snapshot.assets);
+ const generated=one<Asset>('SELECT * FROM assets WHERE id=?',shot.image_id!)!;
+ const prior=all<Asset>("SELECT assets.* FROM shots JOIN assets ON assets.id=shots.image_id WHERE shots.job_id=? AND shots.id<>? AND shots.status='done' LIMIT 2",job.id,shot.id);
+ const result=await vision(`Quality check. Compare last generated image against model face/body and garment refs. Other result images are previous shots: check excessive similarity. Check identity/product details, anatomy, mirror physics, product visibility and shot type. Target plan: ${shot.plan}. Give Korean issues. Mark uncertain details as issues.`,[...refs.slice(0,8),...prior,generated],reviewSchema,'quality_review');
+ run("UPDATE shots SET status='done',review=?,error=NULL WHERE id=?",JSON.stringify(result),shot.id);
+ }catch(e){console.error(JSON.stringify({event:'review_failed',shot_id:shot.id,error:message(e)}));run("UPDATE shots SET status='done',review=?,error=NULL WHERE id=?",JSON.stringify({passed:false,issues:['자동 검수 실패: '+message(e)+' 직접 검수해 주세요.']}),shot.id);}
+}
+// Review has its own single slot. Slow review cannot hold generation slots.
+async function reviews(){while(!stopping){const shot=one<Shot>("SELECT shots.* FROM shots JOIN jobs ON jobs.id=shots.job_id WHERE shots.status='review_pending' AND jobs.status='running' ORDER BY shots.rowid LIMIT 1");if(shot)await review(shot);else await new Promise(r=>setTimeout(r,300));}}
+const reviewing=reviews();
+
 while(!stopping){
  const job=one<Job>("SELECT * FROM jobs WHERE status='queued' ORDER BY created_at LIMIT 1");if(job)await prepare(job);
- const shots=all<Shot>("SELECT shots.* FROM shots JOIN jobs ON jobs.id=shots.job_id WHERE shots.status IN ('queued','review_pending') AND jobs.status='running' LIMIT ?",Math.max(1,Math.min(3,Number(process.env.GENERATION_CONCURRENCY)||2)));
+ const shots=all<Shot>("SELECT shots.* FROM shots JOIN jobs ON jobs.id=shots.job_id WHERE shots.status='queued' AND jobs.status='running' LIMIT ?",Math.max(1,Math.min(3,Number(process.env.GENERATION_CONCURRENCY)||1)));
  await Promise.all(shots.map(work));
  run("UPDATE jobs SET status=CASE WHEN EXISTS(SELECT 1 FROM shots WHERE job_id=jobs.id AND status='failed') THEN 'partial' ELSE 'done' END WHERE status='running' AND NOT EXISTS(SELECT 1 FROM shots WHERE job_id=jobs.id AND status IN ('queued','generating','reviewing','review_pending'))");
  if(!job&&!shots.length)await new Promise(r=>setTimeout(r,1000));
 }
+await reviewing;
 clearInterval(timer);

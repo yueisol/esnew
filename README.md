@@ -27,7 +27,7 @@ npm run worker
 | `STUDIO_PASSWORD` | 비공개 스튜디오 공유 비밀번호 |
 | `SESSION_SECRET` | 강한 무작위 32바이트 이상 문자열. 세션 서명에 사용 |
 | `DATA_DIR` | 기본 `.data`, 운영에서는 반드시 영구 디스크 경로 |
-| `GENERATION_CONCURRENCY` | 기본 2, 최대 3 |
+| `GENERATION_CONCURRENCY` | 기본 1, 최대 3 |
 | `COOKIE_SECURE` | HTTPS 배포에서 반드시 `true` |
 | `APP_ORIGIN` | 프록시 뒤 배포 시 정확한 공개 origin (예: https://example.onrender.com) |
 
@@ -90,3 +90,9 @@ npm run test:browser # 로컬 Chromium 필요; tests/browser.ts 실행 경로 �
 통합 검증은 별도 임시 DATA_DIR, 테스트 비밀번호, 고정된 모킹 이미지로 실행합니다. 실제 OpenAI 호출은 전혀 하지 않습니다. 로그인 보호, 파일 디코딩, 중복 클릭, 10/11컷 완료, 한 컷 재생성 격리, 승인, ZIP/JPG, 저장 상태 복구를 검사합니다. 촬영 플래너 단위 테스트는 10/11컷 분배, 하의 구도, 얼굴 참조 우선순위, 재시도 정책을 검증합니다.
 
 실제 OpenAI API 키가 환경에 없어 실제 이미지 생성/검수 호출 및 결과 품질은 검증하지 않았습니다. 공식 문서 사이트 접근도 환경의 도메인 정책에서 차단되어 공식 GitHub SDK를 참고했습니다. 얼굴 동일성, 소재·로고·단추·거울 물리 정확도는 생성형 모델이 보장하지 않으며 자동 검수도 완전하지 않습니다. 승인 전에 원본과 대조해야 합니다. 첫 운영 검증은 작은 비용으로 한 컷을 별도 확인한 뒤 전체 촬영을 권장합니다.
+
+## 생성이 첫 두 장에서 멈춘 것처럼 보일 때
+
+생성과 자동 검수는 독립 큐로 처리합니다. 검수 요청은 90초 제한 후 수동 검수 대상으로 표시하며 생성 이미지는 유지합니다. 분석/검수용 전송 이미지만 최대 1600px JPEG로 줄이고, 이미지 편집 원본과 다운로드 결과는 그대로 유지합니다. 워커 상태는 화면에서 주기적으로 갱신합니다. `image_saved`, `generation_failed`, `review_failed` 로그에는 컷 ID와 처리 결과를 남깁니다.
+
+Render에서 `DATA_DIR=/var/data/hi-esol`, 해당 경로의 영구 디스크 연결, 인스턴스 수 1, Start Command `npm start`를 확인하세요. Environment에 경로만 입력하는 것은 디스크 연결이 아닙니다. 수동으로 생성한 Web Service에는 render.yaml이 자동 적용되지 않습니다. 임시 디스크의 데이터는 재배포/재시작으로 사라질 수 있으며, 사라진 원본 파일은 코드 수정만으로 복원할 수 없습니다. 재배포 전 기존 결과를 다운로드하세요. 메모리가 작은 서비스는 `GENERATION_CONCURRENCY=1`을 권장합니다.

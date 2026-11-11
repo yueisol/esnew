@@ -17,6 +17,7 @@ try{
  const jobs=await Promise.all([json('jobs','POST',input),json('jobs','POST',input)]);assert.equal(jobs[0].id,jobs[1].id);
  worker=spawn('node',['--import','tsx','tests/mock-worker.ts'],{env,stdio:'pipe'});worker.stderr?.on('data',d=>process.stderr.write(d));
  async function complete(id:string){for(let i=0;i<120;i++){const j=await json('jobs/'+id);if(j.status==='done')return j;if(j.status==='failed'||j.status==='partial')throw new Error(JSON.stringify(j));await new Promise(r=>setTimeout(r,250));}throw new Error('Timed out');}
+ let advanced=false;for(let i=0;i<35;i++){const pending=await json('jobs/'+jobs[0].id);if(pending.shots.filter((s:{image_id:string|null})=>s.image_id).length>=3){assert.equal(pending.shots.filter((s:{status:string})=>s.status==='done').length,0);advanced=true;break;}await new Promise(r=>setTimeout(r,200));}assert.ok(advanced,'Generation must progress past the first pair while review is still delayed');
  let job=await complete(jobs[0].id);assert.equal(job.shots.length,10);assert.ok(job.shots.every((s:{status:string})=>s.status==='done'));
  const oldIds=job.shots.map((s:{image_id:string})=>s.image_id);await json(`shots/${job.shots[0].id}/retry`,'POST',{feedback:'손 수정'});job=await complete(job.id);assert.notEqual(job.shots[0].image_id,oldIds[0]);assert.deepEqual(job.shots.slice(1).map((s:{image_id:string})=>s.image_id),oldIds.slice(1));
  await json(`shots/${job.shots[0].id}/approve`,'POST',{});assert.equal((await json('jobs/'+job.id)).shots[0].approved,1);
