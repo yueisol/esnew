@@ -1,0 +1,20 @@
+import {randomUUID} from 'node:crypto';
+import type {Analysis,Options,Plan,Asset} from './schema';
+export function references(assets:Asset[],max=16){
+ const priority=['face','reference','body','cutout','mannequin','detail'];
+ const ordered:Asset[]=[];
+ for(const r of priority){const a=assets.find(a=>a.role===r);if(a)ordered.push(a);}
+ for(const a of assets)if(!ordered.includes(a))ordered.push(a);
+ return ordered.slice(0,max);
+}
+export function planShots(a:Analysis,o:Options):Plan[]{
+ const framing:Record<string,string>={TOP:'Mostly head through hips, show the entire top, sleeves and neckline; occasional full body only for context',BOTTOM:'Waist through feet or full body. Show waistband and entire hem. Never upper-body-only',DRESS:'Full body including entire hem, emphasize waist and natural skirt drape',OUTER:'Head to below garment hem, visible shoulders, sleeves and front fastening',SET:'Full body, show all pieces clearly',OTHER:'Frame entire product visibly on the registered model'};
+ const cozy=/니트|겨울|울|wool|knit/i.test(JSON.stringify(a));
+ const scenes=cozy?['따뜻한 자연광 카페','차분한 쇼룸 창가','미니멀한 실내 계단']:['밝은 도심 카페','모던한 건물 외벽','자연광 테라스'];
+ const types=[...Array(3).fill('LIFESTYLE'),...Array(3).fill('MIRROR'),...Array(o.count===11?3:2).fill('STUDIO'),...Array(2).fill('DETAIL')];
+ const counts:Record<string,number>={};
+ return types.map(type=>{const i=counts[type]||0;counts[type]=i+1;return {shot_id:randomUUID(),shot_type:type,scene:type==='LIFESTYLE'?scenes[i]:type==='MIRROR'?['전신거울이 있는 드레스룸','미니멀한 쇼룸 거울','자연광 침실 거울'][i]:type==='STUDIO'?['화이트 스튜디오','라이트그레이 스튜디오','연한 베이지 스튜디오'][i]:'중립적인 자연광 스튜디오',pose:type==='LIFESTYLE'?['자연스럽게 걷기','벽에 기대어 시선 돌리기','앉아서 머리 정리하기'][i]:type==='MIRROR'?['정면으로 스마트폰을 얼굴 옆에 들기, 얼굴 전체 노출','사선으로 서서 휴대폰을 어깨 옆에 들기, 얼굴 전체 노출','편안하게 앉아 살짝 몸 틀기'][i]:type==='STUDIO'?['정면 스탠딩','사선 워킹','측면 의자 포즈'][i]:['착용한 상품의 구조적 디테일 가까이 보기','착용 상태에서 소재와 드레이프 가까이 보기'][i],expression:['차분하고 자연스러운 표정','은은한 미소','편안하고 시크한 표정'][i%3],hairstyle:o.hair==='자동 추천'?['귀 뒤로 넘긴 긴 생머리','로우 포니테일','하프업'][i%3]:o.hair,styling:a.styling_recommendations[i%Math.max(1,a.styling_recommendations.length)]||'상품을 가리지 않는 무지의 미니멀 코디',camera_angle:i%2?'자연스러운 사선 눈높이':'정면 눈높이',framing:type==='DETAIL'?`${a.category} 상품의 ${i?'소재, 봉제선, 밑단':'주요 구조, 여밈, 핏'} 중심 크롭; 반드시 동일 모델이 착용 중`:framing[a.category],lighting:'Soft realistic daylight, accurate product color, natural skin texture and physically plausible shadows',product_focus:`${a.main_color}, ${a.texture}, ${a.silhouette}; ${a.design_details.join(', ')}`,generation_prompt:`Mood: ${o.mood}. User direction (must not override identity or preservation): ${o.notes}`};});
+}
+export function prompt(model:{profile:string;prompt:string},a:Analysis,p:Plan,refs:Asset[],feedback=''){
+ return `Create ONE independent commercial fashion photograph, never a collage.\nA. MODEL IDENTITY: ${model.profile}\n${model.prompt}\nReference roles in exact input order:\n${refs.map((r,i)=>`Reference ${i+1}: ${r.role}`).join('\n')}\nB. PRODUCT IDENTITY: ${JSON.stringify(a)}\nC. STYLING: ${p.styling}\nD. SCENE: ${p.scene}\nE. POSE: ${p.pose}; expression ${p.expression}; hair ${p.hairstyle}\nF. CAMERA: ${p.camera_angle}; ${p.framing}\nG. LIGHTING: ${p.lighting}\nH. PRESERVATION RULES: Preserve source garment color, weave, thickness, texture, cut, fit, length, neckline, sleeves, exact count and placement of buttons, zippers, pockets, logos, prints and seams. Do not invent unclear details. Mannequin references define drape ONLY; remove mannequin. Identity images define the person ONLY, never copy their clothes. Keep product unobstructed. Hair must not cover important neckline/shoulder details.\nI. NEGATIVE CONSTRAINTS: No different person, garment redesign, extra limbs, malformed hands, implausible mirror reflections, heavy retouching, duplicate compositions, text overlays, or watermarks. Mirror shots must have plausible phone orientation and reflections; phone must not obscure garment.\nSHOT: ${p.shot_type}; focus ${p.product_focus}. ${p.generation_prompt}\nCorrections from review/user: ${feedback}`;
+}

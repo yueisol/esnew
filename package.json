@@ -1,0 +1,38 @@
+{
+  "name": "hi-esol",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env.local node_modules/next/dist/bin/next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "node --env-file-if-exists=.env.local scripts/start.mjs",
+    "web": "next start --hostname 0.0.0.0",
+    "worker": "node --env-file-if-exists=.env.local --import tsx src/lib/worker.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "check:openai": "node --env-file-if-exists=.env.local scripts/check-openai.mjs",
+    "test:integration": "node --import tsx tests/integration.ts",
+    "test:browser": "node --import tsx tests/browser.ts"
+  },
+  "dependencies": {
+    "next": "^16.0.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "sharp": "^0.34.0",
+    "zod": "^4.0.0",
+    "jszip": "^3.10.1",
+    "lucide-react": "^0.468.0",
+    "tsx": "^4.20.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@playwright/test": "^1.56.0"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "type": "module"
+}

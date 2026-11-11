@@ -1,0 +1,92 @@
+# HI, ESOL — AI Fashion Photoshoot Studio
+
+한국어 Next.js 웹앱. 모델 참조/상품 이미지 → 구조화된 OpenAI 분석 → 카테고리별 10/11컷 촬영 계획 → 개별 Images Edits 요청 → 자동 검수 → 승인·개별 JPG/PNG·ZIP 다운로드를 구현합니다. 모킹은 `tests/mock-worker.ts`에서만 사용합니다. 운영 코드에는 가짜 결과 또는 성공 처리가 없습니다.
+
+## 실행
+
+Node.js 24 이상이 필요합니다.
+
+```bash
+npm ci
+cp .env.example .env.local
+# .env.local의 키와 스튜디오 비밀번호, 세션 비밀값 입력
+npm run dev
+# 별도 터미널
+npm run worker
+```
+
+프로덕션: `npm run build && npm start`. start는 웹과 워커를 함께 감독하며 한쪽이 종료되면 전체 서비스를 종료합니다. 스튜디오 로그인 후 유이솔 모델에 설정집/얼굴/체형 이미지를 등록하고 상품 누끼컷을 올리세요. 채팅 첨부 이미지 원본은 저장소에 포함되어 있지 않으므로 직접 업로드해야 합니다.
+
+## 환경변수
+
+| 이름 | 용도 |
+| --- | --- |
+| `OPENAI_API_KEY` | 서버 전용 OpenAI 키. `.env.local` 또는 Render Secret에 입력 |
+| `IMAGE_MODEL` | 기본 `gpt-image-2.6-sunburst` |
+| `VISION_MODEL` | 기본 `gpt-4.1`, Responses 이미지 이해·구조화 출력 |
+| `STUDIO_PASSWORD` | 비공개 스튜디오 공유 비밀번호 |
+| `SESSION_SECRET` | 강한 무작위 32바이트 이상 문자열. 세션 서명에 사용 |
+| `DATA_DIR` | 기본 `.data`, 운영에서는 반드시 영구 디스크 경로 |
+| `GENERATION_CONCURRENCY` | 기본 2, 최대 3 |
+| `COOKIE_SECURE` | HTTPS 배포에서 반드시 `true` |
+| `APP_ORIGIN` | 프록시 뒤 배포 시 정확한 공개 origin (예: https://example.onrender.com) |
+
+키는 브라우저로 전송하지 않습니다. 서버 API/이미지/다운로드 모두 서명된 HttpOnly 세션 쿠키로 보호하며 동일 스튜디오의 사용자들이 데이터를 공유합니다. 개인별 계정/테넌트 분리가 필요한 SaaS 구조는 아닙니다. 외부 이미지 공개 URL을 생성하지 않습니다. 업로드는 MIME 허용 목록, 실제 이미지 디코딩, 픽셀 수, 20MB 파일/21MB 요청 크기, 대상별 24장 제한을 검증합니다. EXIF는 정규화 과정에서 제거됩니다.
+
+## OpenAI 연결
+
+`https://api.openai.com` outbound HTTPS 허용 및 결제가 가능한 API 프로젝트가 필요합니다. 일부 이미지 모델은 조직 인증/모델 권한이 필요할 수 있습니다. 키 입력 후 `npm run check:openai`로 모델 접근 권한을 비용 없이 조회할 수 있습니다. 공식 SDK의 Images Edit 타입을 확인했습니다:
+https://github.com/openai/openai-node/blob/master/src/resources/images.ts
+
+요청 모델은 환경변수로 교체합니다. 기본 `high`, PNG, `1024x1536` 또는 정사각형 `1024x1024`, `n=1`을 사용합니다. 이전 1/1.5 모델에만 `input_fidelity=high`를 넣으며 2.x에서는 보내지 않습니다. 얼굴→설정집→체형→누끼→마네킹→디테일을 우선 선택하여 최대 16장을 전달하고 역할을 명시합니다. 생성 모델이 지원하지 않는 이름/파라미터는 오류로 표시합니다. 모델 접근 가능 여부는 실제 계정으로 요청해야 확정할 수 있습니다.
+
+3:4/4:5는 현재 네이티브 세로 출력 전체를 유지한 채 중립색 여백을 넣어 지정 비율에 맞춥니다. 3:4는 1152×1536, 4:5는 1280×1600 캔버스를 사용하며 원본 픽셀을 확대하지 않습니다. 크롭으로 의류를 자르거나 단순 업스케일을 고해상도 원본으로 주장하지 않습니다. xhigh/max와 더 큰 네이티브 해상도는 계정·모델 지원을 실제 검증하지 못하여 현재 UI에서 제공하지 않습니다.
+
+## 구조와 데이터
+
+```text
+src/app/page.tsx                한국어 스튜디오/결과/모델 편집 UI
+src/app/api/[...path]/route.ts  인증, 업로드, 작업, 승인, 재생성, 다운로드
+src/lib/db.ts                  SQLite 스키마, WAL, 트랜잭션
+src/lib/schema.ts              상품 분석/촬영 옵션 검증, 유이솔 기본 프로필
+src/lib/planner.ts             카테고리별 촬영 기획·참조 선택·프롬프트
+src/lib/openai.ts              Responses/Images Edits, 지수 백오프
+src/lib/worker.ts              영구 큐 소비, 개별 생성, 검수, 복구
+scripts/start.mjs              웹/워커 감독
+render.yaml                    영구 디스크 포함 Render Blueprint
+```
+
+- `models`: id, name, profile, prompt, created_at, updated_at.
+- `assets`: owner_id, role(reference/face/body/cutout/mannequin/detail/result), 서버 파일 경로.
+- `products`: 상품명, 구조화된 analysis.
+- `jobs`: 선택 모델/상품, 옵션, 상태, 중복 방지 키, **생성 시작 시 모델·참조 스냅샷**.
+- `shots`: 촬영 계획, 상태, 결과 이미지, 검수, 승인, 재생성 횟수.
+- `history`: 이전 결과·계획·검수 보존. 현재 UI는 최신 결과만 표시.
+
+SQLite DB 및 비공개 PNG는 모두 DATA_DIR 아래 저장합니다. 새로고침/브라우저 재접속 후 촬영 기록에서 복구됩니다. 재생성 시 다른 컷과 기존 결과 파일은 유지됩니다. 생성 완료 결과는 즉시 API와 화면에 나타납니다. 작업 상태는 실제 생성 및 검수 결과를 기준으로 표시합니다.
+
+워커 중단 후 미완료 분석은 재실행합니다. 생성 중이던 요청은 실제 과금 여부를 알 수 없으므로 실패 상태로 전환하여 사용자가 재시도하도록 합니다. 저장 후 검수 중이던 이미지는 검수만 재개합니다. 429/일시적 서버 오류는 최대 3회 백오프합니다. 네트워크 타임아웃은 비용 중복 위험 때문에 자동 재전송하지 않습니다. 원격 API의 정확히 한 번 실행을 보장하지 않습니다. **동일 DATA_DIR에서 워커는 한 개만 실행**해야 합니다.
+
+## Render
+
+1. 이 코드를 GitHub 저장소에 커밋/푸시합니다.
+2. Render에서 Blueprint로 `render.yaml`을 선택합니다.
+3. OPENAI_API_KEY, STUDIO_PASSWORD를 보안 설정에 입력합니다. SESSION_SECRET은 자동 생성합니다.
+4. APP_ORIGIN에 서비스의 HTTPS 주소를 설정합니다.
+5. 유료 영구 디스크 `/var/data/hi-esol`이 연결되었는지 확인하고 배포합니다.
+
+SQLite와 파일을 같은 디스크에서 사용하므로 **단일 인스턴스만 지원**합니다. Render 영구 디스크는 여러 서비스/인스턴스 사이에 공유되지 않으므로 별도 Render worker 서비스로 분리하지 않습니다. 자동 확장·서버리스 배포에는 PostgreSQL, 공유 비공개 오브젝트 스토리지 및 분산 큐로 이전해야 합니다. 디스크 백업/보관 기간과 비용 한도는 운영자가 설정해야 합니다. 배포/게시/푸시는 이 작업에서 수행하지 않았습니다.
+
+## 검증
+
+```bash
+npm run typecheck
+npm run build
+npm test
+npm run test:integration
+npm run test:browser # 로컬 Chromium 필요; tests/browser.ts 실행 경로 조정
+```
+
+통합 검증은 별도 임시 DATA_DIR, 테스트 비밀번호, 고정된 모킹 이미지로 실행합니다. 실제 OpenAI 호출은 전혀 하지 않습니다. 로그인 보호, 파일 디코딩, 중복 클릭, 10/11컷 완료, 한 컷 재생성 격리, 승인, ZIP/JPG, 저장 상태 복구를 검사합니다. 촬영 플래너 단위 테스트는 10/11컷 분배, 하의 구도, 얼굴 참조 우선순위, 재시도 정책을 검증합니다.
+
+실제 OpenAI API 키가 환경에 없어 실제 이미지 생성/검수 호출 및 결과 품질은 검증하지 않았습니다. 공식 문서 사이트 접근도 환경의 도메인 정책에서 차단되어 공식 GitHub SDK를 참고했습니다. 얼굴 동일성, 소재·로고·단추·거울 물리 정확도는 생성형 모델이 보장하지 않으며 자동 검수도 완전하지 않습니다. 승인 전에 원본과 대조해야 합니다. 첫 운영 검증은 작은 비용으로 한 컷을 별도 확인한 뒤 전체 촬영을 권장합니다.

@@ -1,0 +1,31 @@
+services:
+  - type: web
+    name: hi-esol
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    disk:
+      name: studio-data
+      mountPath: /var/data/hi-esol
+      sizeGB: 10
+    envVars:
+      - key: NODE_VERSION
+        value: 24.22.1
+      - key: DATA_DIR
+        value: /var/data/hi-esol
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: STUDIO_PASSWORD
+        sync: false
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: IMAGE_MODEL
+        value: gpt-image-2.6-sunburst
+      - key: VISION_MODEL
+        value: gpt-4.1
+      - key: COOKIE_SECURE
+        value: true
+      - key: GENERATION_CONCURRENCY
+        value: 2

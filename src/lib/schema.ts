@@ -1,0 +1,11 @@
+import { z } from 'zod';
+export const optionsSchema=z.object({count:z.union([z.literal(10),z.literal(11)]).default(10),ratio:z.enum(['3:4','4:5','1:1']).default('3:4'),mood:z.enum(['자동 추천','내추럴','시크','미니멀','러블리','캐주얼']).default('자동 추천'),hair:z.enum(['자동 추천','긴 생머리','웨이브','묶음머리']).default('자동 추천'),notes:z.string().max(2000).default('')});
+export type Options=z.infer<typeof optionsSchema>;
+const field=z.string();
+export const analysisSchema=z.object({category:z.enum(['TOP','BOTTOM','DRESS','OUTER','SET','OTHER']),subcategory:field,main_color:field,secondary_color:field,pattern:field,material:field,texture:field,fit:field,silhouette:field,neckline:field,shoulder_structure:field,sleeve_length:field,garment_length:field,waistline:field,hemline:field,fastening:field,design_details:z.array(field),unique_features:z.array(field),styling_recommendations:z.array(field),visual_uncertainties:z.array(field)});
+export type Analysis=z.infer<typeof analysisSchema>;
+export const profile='유이솔 (Yoo Isol), 가상 성인 여성 모델, 21세, 160cm, 44kg, B컵. 밝은 피부, 슬림한 체형, 잘록한 허리와 약간 넓은 골반, 가늘고 긴 팔다리, 직각 어깨, 균형 잡힌 자연스러운 비율. 자연스럽고 청순한 한국 여성 얼굴, 크지만 과장되지 않은 눈, 작은 자연스러운 코, 부드러운 입술과 얼굴 윤곽. 청순하고 시크하며 사랑스러운 분위기. 다크브라운~블랙 긴 생머리, 자연스러운 볼륨과 레이어드.';
+export const identity='Use the exact same adult fictional woman from the identity references. Preserve face contour, eye shape and spacing, nose, lips, skin tone, shoulder proportions, waist and hip proportions. Hair, expression and scene may vary; identity must not.';
+export const roles=['reference','face','body','cutout','mannequin','detail'] as const;
+export type Asset={id:string;owner_id:string;role:typeof roles[number];filename:string;path:string;mime:string};
+export type Plan={shot_id:string;shot_type:string;scene:string;pose:string;expression:string;hairstyle:string;styling:string;camera_angle:string;framing:string;lighting:string;product_focus:string;generation_prompt:string};
