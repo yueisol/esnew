@@ -1,6 +1,6 @@
 import {mkdir,writeFile,rename,unlink,access} from 'node:fs/promises';
 import path from 'node:path';
-import sharp from 'sharp';
+import {renderPhotographicFinish} from './photographic-finish';
 import {root,one,run,transaction} from './db';
 import type {Options} from './schema';
 export type ResultShot={id:string;job_id:string;revision:number};
@@ -13,8 +13,9 @@ export async function checkpointResult(s:ResultShot,bytes:Buffer){
 export async function finishResult(s:ResultShot,options:Options){
  const width=options.ratio==='3:4'?1152:options.ratio==='4:5'?1280:1024,height=options.ratio==='1:1'?1024:options.ratio==='3:4'?1536:1600;
  const id=`${s.id}-r${s.revision}`,dest=path.join(root,'files',id+'.png');
- // Decode/encode directly between files, avoiding another full output Buffer.
- await sharp(checkpoint(s)).resize(width,height,{fit:'contain',background:'#f4f3f1',withoutEnlargement:true}).png().toFile(dest+'.tmp');
+ const shot=one<{plan:string}>('SELECT plan FROM shots WHERE id=?',s.id);
+ const type=shot?JSON.parse(shot.plan).shot_type:'STUDIO';
+ await renderPhotographicFinish(checkpoint(s),dest+'.tmp',width,height,`${s.id}:${s.revision}`,type);
  await rename(dest+'.tmp',dest);
  transaction(()=>{
   const current=one<{revision:number}>('SELECT revision FROM shots WHERE id=?',s.id);

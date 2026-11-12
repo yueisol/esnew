@@ -43,3 +43,7 @@ test('detail focus respects garment category and explicit hairstyle survives com
  assert.match(bottom[0].framing,/waistband, hip/);
  assert.doesNotMatch(bottom[0].framing,/neckline/);
 });
+test('new and saved plans receive photographic rendering and grain-aware inspection',()=>{
+ const plans=planShots(analysis,optionsSchema.parse({}));
+ for(const p of plans){const text=prompt({profile:'same model',prompt:'preserve face'},analysis,{...p,lighting:'Legacy lighting'},[]);assert.match(text,/PHOTOGRAPHIC RENDERING/);assert.match(text,/faithful product color/);assert.match(text,/No CGI gloss/);assert.match(reviewInstruction(p),/grain is intentional/);}
+});
