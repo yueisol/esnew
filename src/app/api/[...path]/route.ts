@@ -8,7 +8,6 @@ import {z} from 'zod';
 import {all,one,run,transaction,root} from '@/lib/db';
 import {configured,authorized,equal,token} from '@/lib/auth';
 import {roles,optionsSchema,profile,identity,type Asset} from '@/lib/schema';
-import {jobAvailable,assetExpired} from '@/lib/retention';
 import {imageModel} from '@/lib/openai';
 export const runtime='nodejs';export const dynamic='force-dynamic';
 const loginAttempts=new Map<string,{count:number;at:number}>();
@@ -53,7 +52,7 @@ async function handler(req:Request,context:{params:Promise<{path:string[]}>}){
  const aid=randomUUID(),dest=path.join(root,'files',aid+'.png');await writeFile(dest,await sharp(bytes,{limitInputPixels:40000000}).rotate().resize({width:2400,height:2400,fit:'inside',withoutEnlargement:true}).png().toBuffer(),{mode:0o600});run('INSERT INTO assets VALUES(?,?,?,?,?,?)',aid,owner,role,file.name.slice(0,200),dest,'image/png');return json({id:aid,role,filename:file.name});
  }
  if(resource==='assets'){
- const asset=one<Asset>('SELECT * FROM assets WHERE id=?',id);if(!asset)return fail('이미지를 찾을 수 없거나 보관 기간이 만료되었습니다.',404);if(assetExpired(asset.owner_id))return fail('7일 보관 기간이 만료된 이미지입니다.',410);
+ const asset=one<Asset>('SELECT * FROM assets WHERE id=?',id);if(!asset)return fail('이미지를 찾을 수 없습니다.',404);
  if(method==='DELETE'){
  if(asset.role as string==='result'||one("SELECT id FROM jobs WHERE snapshot LIKE ?",'%'+id+'%'))return fail('촬영에 사용된 참조는 삭제할 수 없습니다.',409);
  run('DELETE FROM assets WHERE id=?',id);await unlink(asset.path);return json({ok:true});}
@@ -61,24 +60,24 @@ async function handler(req:Request,context:{params:Promise<{path:string[]}>}){
  return new Response(new Uint8Array(data),{headers:{'Content-Type':fmt==='jpg'?'image/jpeg':asset.mime,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff',...(fmt?{'Content-Disposition':`attachment; filename="${filename}.${fmt==='jpg'?'jpg':'png'}"`}:{})}});
  }
  if(resource==='jobs'){
- if(id&&!jobAvailable(id))return fail('작업을 찾을 수 없거나 7일 보관 기간이 만료되었습니다.',410);
+ if(id&&!one('SELECT id FROM jobs WHERE id=?',id))return fail('작업을 찾을 수 없습니다.',404);
  if(method==='GET'&&action==='zip'){
  const shots=all<{image_id:string;plan:string}>("SELECT image_id,plan FROM shots WHERE job_id=? AND image_id IS NOT NULL",id);if(!shots.length)return fail('다운로드 가능한 이미지가 없습니다.');
  const zip=new JSZip();const counts:Record<string,number>={};const fmt=new URL(req.url).searchParams.get('format')==='png'?'png':'jpg';
  for(const s of shots){const type=JSON.parse(s.plan).shot_type;counts[type]=(counts[type]||0)+1;const a=one<Asset>('SELECT * FROM assets WHERE id=?',s.image_id)!;const b=await readFile(a.path);zip.file(`PRODUCT_${id.slice(0,8)}_${type}_${String(counts[type]).padStart(2,'0')}.${fmt}`,fmt==='jpg'?await sharp(b).jpeg({quality:95}).toBuffer():b);}
  return new Response(new Uint8Array(await zip.generateAsync({type:'nodebuffer'})),{headers:{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="HI_ESOL_photoshoot.zip"','Cache-Control':'no-store'}});
  }
- if(method==='GET'){if(!id)return json(all("SELECT jobs.id,jobs.status,jobs.created_at,jobs.expires_at,products.name AS product_name,(SELECT image_id FROM shots WHERE job_id=jobs.id AND image_id IS NOT NULL ORDER BY rowid LIMIT 1) AS thumbnail_id FROM jobs JOIN products ON products.id=jobs.product_id WHERE jobs.expires_at>? ORDER BY jobs.created_at DESC",Date.now()));const j=one('SELECT id,product_id,model_id,options,status,error,created_at,expires_at FROM jobs WHERE id=?',id);if(!j)return fail('작업을 찾을 수 없습니다.',404);return json({...j,analysis:one('SELECT analysis FROM products WHERE id=?',String(j.product_id))?.analysis,shots:all('SELECT * FROM shots WHERE job_id=? ORDER BY rowid',id)});}
+ if(method==='GET'){if(!id)return json(all("SELECT jobs.id,jobs.status,jobs.created_at,products.name AS product_name,(SELECT image_id FROM shots WHERE job_id=jobs.id AND image_id IS NOT NULL ORDER BY rowid LIMIT 1) AS thumbnail_id FROM jobs JOIN products ON products.id=jobs.product_id ORDER BY jobs.created_at DESC"));const j=one('SELECT id,product_id,model_id,options,status,error,created_at FROM jobs WHERE id=?',id);if(!j)return fail('작업을 찾을 수 없습니다.',404);return json({...j,analysis:one('SELECT analysis FROM products WHERE id=?',String(j.product_id))?.analysis,shots:all('SELECT * FROM shots WHERE job_id=? ORDER BY rowid',id)});}
  if(action==='retry'){run("UPDATE jobs SET status='queued',error=NULL WHERE id=? AND status='failed'",id);return json({ok:true});}
  const b=z.object({product_id:z.string(),model_id:z.string(),options:optionsSchema,idempotency:z.string().uuid()}).parse(await req.json());
- const old=one('SELECT id FROM jobs WHERE idempotency=?',b.idempotency);if(old){if(!jobAvailable(String(old.id)))return fail('이 촬영의 보관 기간이 만료되었습니다. 새 상품 촬영을 시작해 주세요.',410);return json(old);}
+ const old=one('SELECT id FROM jobs WHERE idempotency=?',b.idempotency);if(old)return json(old);
  if(!process.env.OPENAI_API_KEY)return fail('서버에 OPENAI_API_KEY를 설정해 주세요.',503);
  const model=one('SELECT * FROM models WHERE id=?',b.model_id);const assets=all<Asset>('SELECT * FROM assets WHERE owner_id IN (?,?)',b.model_id,b.product_id);
  if(!model||!one('SELECT id FROM products WHERE id=?',b.product_id)||!assets.some(a=>a.role==='cutout')||!assets.some(a=>['face','reference'].includes(a.role)))return fail('모델 얼굴 또는 설정집과 상품 누끼컷이 필요합니다.');
- const jid=transaction(()=>{const active=one<{id:string}>("SELECT id FROM jobs WHERE product_id=? AND status IN ('queued','analyzing','planning','running') AND expires_at>?",b.product_id,Date.now());if(active)return active.id;const jid=randomUUID();run('INSERT INTO jobs(id,product_id,model_id,options,idempotency,snapshot) VALUES(?,?,?,?,?,?)',jid,b.product_id,b.model_id,JSON.stringify(b.options),b.idempotency,JSON.stringify({model,assets}));return jid;});return json({id:jid});
+ const jid=transaction(()=>{const active=one<{id:string}>("SELECT id FROM jobs WHERE product_id=? AND status IN ('queued','analyzing','planning','running')",b.product_id);if(active)return active.id;const jid=randomUUID();run('INSERT INTO jobs(id,product_id,model_id,options,idempotency,snapshot) VALUES(?,?,?,?,?,?)',jid,b.product_id,b.model_id,JSON.stringify(b.options),b.idempotency,JSON.stringify({model,assets}));return jid;});return json({id:jid});
  }
  if(resource==='shots'&&method==='POST'){
- const shot=one<{status:string;job_id:string;plan:string;image_id:string|null;review:string|null}>('SELECT * FROM shots WHERE id=?',id);if(!shot)return fail('촬영 컷을 찾을 수 없습니다.',404);if(!jobAvailable(shot.job_id))return fail('7일 보관 기간이 만료된 촬영입니다.',410);
+ const shot=one<{status:string;job_id:string;plan:string;image_id:string|null;review:string|null}>('SELECT * FROM shots WHERE id=?',id);if(!shot)return fail('촬영 컷을 찾을 수 없습니다.',404);
  if(action==='approve'){if(!shot.image_id||shot.status!=='done')return fail('완료된 이미지만 승인할 수 있습니다.');run('UPDATE shots SET approved=1 WHERE id=?',id);return json({ok:true});}
  if(['queued','generating','reviewing','review_pending'].includes(shot.status))return fail('이미 처리 중입니다.',409);
  const b=z.object({feedback:z.string().max(2000).default(''),scene:z.string().max(500).optional(),pose:z.string().max(500).optional(),hairstyle:z.string().max(500).optional()}).parse(await req.json());

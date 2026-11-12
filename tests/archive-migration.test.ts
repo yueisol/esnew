@@ -1,0 +1,26 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,mkdir,writeFile,access} from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import {DatabaseSync} from 'node:sqlite';
+const dir=await mkdtemp(path.join(os.tmpdir(),'esol-archive-migration-'));
+process.env.DATA_DIR=dir;
+await mkdir(path.join(dir,'files'));
+const retained=path.join(dir,'files','old-result.png');await writeFile(retained,'fixture');
+const old=new DatabaseSync(path.join(dir,'studio.sqlite'));
+old.exec(`CREATE TABLE jobs(id TEXT PRIMARY KEY,product_id TEXT,model_id TEXT,options TEXT,status TEXT,error TEXT,idempotency TEXT,snapshot TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP,expires_at INTEGER);
+CREATE TABLE pending_deletions(path TEXT PRIMARY KEY);
+CREATE TRIGGER jobs_set_expiry AFTER INSERT ON jobs WHEN NEW.expires_at IS NULL BEGIN UPDATE jobs SET expires_at=1 WHERE id=NEW.id; END;
+INSERT INTO jobs(id,expires_at,created_at) VALUES('old-job',1,'2000-01-01 00:00:00');`);
+old.prepare('INSERT INTO pending_deletions VALUES(?)').run(retained);old.close();
+const {db,one,run}=await import('../src/lib/db');
+test('upgrades retention database without deleting records or files and disables old expiry trigger',async()=>{
+ assert.ok(one("SELECT id FROM jobs WHERE id='old-job'"));
+ assert.equal(one("SELECT name FROM sqlite_master WHERE type='trigger' AND name='jobs_set_expiry'"),undefined);
+ run("INSERT INTO jobs(id) VALUES('new-job')");
+ assert.equal(one<{expires_at:null}>("SELECT expires_at FROM jobs WHERE id='new-job'")?.expires_at,null);
+ await access(retained);
+ assert.ok(one('SELECT path FROM pending_deletions WHERE path=?',retained));
+ db.close();
+});

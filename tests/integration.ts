@@ -26,19 +26,26 @@ try{
  const image=await req('assets/'+job.shots[0].image_id+'?format=jpg');assert.equal(image.headers.get('content-type'),'image/jpeg');assert.equal((await sharp(Buffer.from(await image.arrayBuffer())).metadata()).width,1152);
  const extended=await json('jobs','POST',{...input,idempotency:crypto.randomUUID(),options:{count:11,ratio:'1:1'}});const extendedJob=await complete(extended.id);assert.equal(extendedJob.shots.length,11);
  worker.kill('SIGTERM');await new Promise(r=>setTimeout(r,1200));assert.equal((await json('jobs/'+job.id)).shots.length,10);
- const archive=await json('jobs');const record=archive.find((r:{id:string})=>r.id===job.id);assert.equal(record.product_name,'테스트 니트');assert.ok(record.thumbnail_id);assert.ok(record.expires_at>Date.now());
- const store=new DatabaseSync(path.join(dir,'studio.sqlite'));store.prepare('UPDATE jobs SET expires_at=? WHERE id=?').run(Date.now()-1,job.id);
- assert.equal((await req('jobs/'+job.id)).status,410);
- assert.equal((await req('jobs/'+job.id+'/zip')).status,410);
- assert.equal((await req('assets/'+job.shots[0].image_id+'?format=jpg')).status,410);
- assert.equal((await req('shots/'+job.shots[0].id+'/retry','POST',{})).status,410);
- assert.ok(!(await json('jobs')).some((r:{id:string})=>r.id===job.id));
+ const archive=await json('jobs');const record=archive.find((r:{id:string})=>r.id===job.id);assert.equal(record.product_name,'테스트 니트');assert.ok(record.thumbnail_id);assert.equal(record.expires_at,undefined);
+ const store=new DatabaseSync(path.join(dir,'studio.sqlite'));
+ store.exec('ALTER TABLE jobs ADD COLUMN expires_at INTEGER');
+ store.prepare("UPDATE jobs SET expires_at=?,created_at='2000-01-01 00:00:00' WHERE id=?").run(Date.now()-1,job.id);
+ // A previous deployment may have left a file scheduled for deletion. Never execute that queue.
+ store.exec('CREATE TABLE pending_deletions(path TEXT PRIMARY KEY)');
+ const retainedPath=path.join(dir,'files',job.shots[0].image_id+'.png');
+ store.prepare('INSERT INTO pending_deletions VALUES(?)').run(retainedPath);
+ assert.equal((await req('jobs/'+job.id)).status,200);
+ assert.equal((await req('jobs/'+job.id+'/zip')).status,200);
+ assert.equal((await req('assets/'+job.shots[0].image_id+'?format=jpg')).status,200);
+ assert.ok((await json('jobs')).some((r:{id:string})=>r.id===job.id));
+ assert.equal((await req('jobs/not-a-job')).status,404);
+ assert.equal((await req('jobs/not-a-job/zip')).status,404);
+ assert.equal((await req('shots/'+job.shots[0].id+'/retry','POST',{})).status,200);
  worker=spawn('node',['--import','tsx','tests/mock-worker.ts'],{env,stdio:'pipe'});
- for(let i=0;i<60;i++){if(!store.prepare('SELECT id FROM jobs WHERE id=?').get(job.id))break;await new Promise(r=>setTimeout(r,100));}
- assert.equal(store.prepare('SELECT id FROM jobs WHERE id=?').get(job.id),undefined);
- for(let i=0;i<60;i++){try{await access(path.join(dir,'files',job.shots[0].image_id+'.png'));}catch{break;}await new Promise(r=>setTimeout(r,100));}
- await assert.rejects(access(path.join(dir,'files',job.shots[0].image_id+'.png')));
+ const resumed=await complete(job.id);assert.equal(resumed.shots.length,10);
+ assert.notEqual(resumed.shots[0].image_id,job.shots[0].image_id);
+ await access(retainedPath);
  assert.ok(store.prepare('SELECT id FROM products WHERE id=?').get(pid));
  assert.equal((await json('jobs/'+extended.id)).shots.length,11);store.close();
- console.log('PASS: authenticated uploads, MIME decoding, duplicate job protection, 10/11-shot mocked worker, single regeneration isolation, approval, ZIP/JPEG, persistent job recovery, archive metadata, expired access denial and restart cleanup.');
+ console.log('PASS: authenticated uploads, MIME decoding, duplicate job protection, 10/11-shot mocked worker, single regeneration isolation, approval, ZIP/JPEG, persistent job recovery, archive metadata, legacy-expired job access and regeneration, no restart deletion.');
 }catch(e){console.error(e);process.exitCode=1;}finally{worker?.kill('SIGTERM');web.kill('SIGTERM');}
