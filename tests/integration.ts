@@ -1,3 +1,4 @@
+import {DatabaseSync} from 'node:sqlite';import {access} from 'node:fs/promises';
 import {spawn} from 'node:child_process';import {mkdtemp} from 'node:fs/promises';import os from 'node:os';import path from 'node:path';import assert from 'node:assert/strict';import sharp from 'sharp';import JSZip from 'jszip';
 const dir=await mkdtemp(path.join(os.tmpdir(),'esol-test-'));const env={...process.env,DATA_DIR:dir,OPENAI_API_KEY:'mock-only-not-a-key',STUDIO_PASSWORD:'test-password',SESSION_SECRET:'integration-test-secret-not-for-production',PORT:'3100'};
 const web=spawn('node',['node_modules/next/dist/bin/next','start','-p','3100'],{env,stdio:'pipe'});let worker:ReturnType<typeof spawn>|undefined;let cookie='';
@@ -25,5 +26,19 @@ try{
  const image=await req('assets/'+job.shots[0].image_id+'?format=jpg');assert.equal(image.headers.get('content-type'),'image/jpeg');assert.equal((await sharp(Buffer.from(await image.arrayBuffer())).metadata()).width,1152);
  const extended=await json('jobs','POST',{...input,idempotency:crypto.randomUUID(),options:{count:11,ratio:'1:1'}});const extendedJob=await complete(extended.id);assert.equal(extendedJob.shots.length,11);
  worker.kill('SIGTERM');await new Promise(r=>setTimeout(r,1200));assert.equal((await json('jobs/'+job.id)).shots.length,10);
- console.log('PASS: authenticated uploads, MIME decoding, duplicate job protection, 10/11-shot mocked worker, single regeneration isolation, approval, ZIP/JPEG, persistent job recovery.');
+ const archive=await json('jobs');const record=archive.find((r:{id:string})=>r.id===job.id);assert.equal(record.product_name,'테스트 니트');assert.ok(record.thumbnail_id);assert.ok(record.expires_at>Date.now());
+ const store=new DatabaseSync(path.join(dir,'studio.sqlite'));store.prepare('UPDATE jobs SET expires_at=? WHERE id=?').run(Date.now()-1,job.id);
+ assert.equal((await req('jobs/'+job.id)).status,410);
+ assert.equal((await req('jobs/'+job.id+'/zip')).status,410);
+ assert.equal((await req('assets/'+job.shots[0].image_id+'?format=jpg')).status,410);
+ assert.equal((await req('shots/'+job.shots[0].id+'/retry','POST',{})).status,410);
+ assert.ok(!(await json('jobs')).some((r:{id:string})=>r.id===job.id));
+ worker=spawn('node',['--import','tsx','tests/mock-worker.ts'],{env,stdio:'pipe'});
+ for(let i=0;i<60;i++){if(!store.prepare('SELECT id FROM jobs WHERE id=?').get(job.id))break;await new Promise(r=>setTimeout(r,100));}
+ assert.equal(store.prepare('SELECT id FROM jobs WHERE id=?').get(job.id),undefined);
+ for(let i=0;i<60;i++){try{await access(path.join(dir,'files',job.shots[0].image_id+'.png'));}catch{break;}await new Promise(r=>setTimeout(r,100));}
+ await assert.rejects(access(path.join(dir,'files',job.shots[0].image_id+'.png')));
+ assert.ok(store.prepare('SELECT id FROM products WHERE id=?').get(pid));
+ assert.equal((await json('jobs/'+extended.id)).shots.length,11);store.close();
+ console.log('PASS: authenticated uploads, MIME decoding, duplicate job protection, 10/11-shot mocked worker, single regeneration isolation, approval, ZIP/JPEG, persistent job recovery, archive metadata, expired access denial and restart cleanup.');
 }catch(e){console.error(e);process.exitCode=1;}finally{worker?.kill('SIGTERM');web.kill('SIGTERM');}

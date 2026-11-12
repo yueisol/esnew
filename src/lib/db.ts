@@ -12,8 +12,20 @@ CREATE TABLE IF NOT EXISTS products(id TEXT PRIMARY KEY,name TEXT NOT NULL,analy
 CREATE TABLE IF NOT EXISTS jobs(id TEXT PRIMARY KEY,product_id TEXT NOT NULL,model_id TEXT NOT NULL,options TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'queued',error TEXT,idempotency TEXT UNIQUE NOT NULL,snapshot TEXT NOT NULL,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS shots(id TEXT PRIMARY KEY,job_id TEXT NOT NULL,plan TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'queued',image_id TEXT,review TEXT,error TEXT,approved INTEGER DEFAULT 0,revision INTEGER DEFAULT 0,feedback TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS history(id INTEGER PRIMARY KEY,shot_id TEXT NOT NULL,image_id TEXT,plan TEXT,review TEXT,created_at TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS pending_deletions(path TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS heartbeat(id INTEGER PRIMARY KEY CHECK(id=1),at INTEGER NOT NULL);
 `);
+// Idempotent migration for existing studios. Never extend retention on restart.
+db.exec('BEGIN IMMEDIATE');
+try {
+if(!(db.prepare('PRAGMA table_info(jobs)').all() as {name:string}[]).some(c=>c.name==='expires_at')){
+ db.exec('ALTER TABLE jobs ADD COLUMN expires_at INTEGER');
+}
+db.exec("UPDATE jobs SET expires_at=(CAST(strftime('%s',created_at) AS INTEGER)+604800)*1000 WHERE expires_at IS NULL; CREATE INDEX IF NOT EXISTS jobs_expiry ON jobs(expires_at)");
+// Applies to old and new insertion paths, including direct test fixtures.
+db.exec("CREATE TRIGGER IF NOT EXISTS jobs_set_expiry AFTER INSERT ON jobs WHEN NEW.expires_at IS NULL BEGIN UPDATE jobs SET expires_at=(CAST(strftime('%s',NEW.created_at) AS INTEGER)+604800)*1000 WHERE id=NEW.id; END");
+db.exec('COMMIT');
+} catch(error) { db.exec('ROLLBACK'); throw error; }
 db.prepare('INSERT OR IGNORE INTO models(id,name,profile,prompt) VALUES(?,?,?,?)').run('yoo-isol','유이솔',profile,identity);
 export function all<T=Record<string,unknown>>(sql:string,...args:(string|number|null)[]):T[]{return db.prepare(sql).all(...args) as T[];}
 export function one<T=Record<string,unknown>>(sql:string,...args:(string|number|null)[]):T|undefined{return db.prepare(sql).get(...args) as T|undefined;}
