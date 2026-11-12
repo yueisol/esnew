@@ -1,4 +1,6 @@
 import {NextResponse} from 'next/server';
+import {Readable} from 'node:stream';
+import {createReadStream} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 import {readFile,writeFile,unlink} from 'node:fs/promises';
 import path from 'node:path';
@@ -10,6 +12,7 @@ import {configured,authorized,equal,token} from '@/lib/auth';
 import {roles,optionsSchema,profile,identity,type Asset} from '@/lib/schema';
 import {imageModel} from '@/lib/openai';
 export const runtime='nodejs';export const dynamic='force-dynamic';
+sharp.cache(false);sharp.concurrency(1);
 const loginAttempts=new Map<string,{count:number;at:number}>();
 const json=(v:unknown,status=200)=>NextResponse.json(v,{status,headers:{'Cache-Control':'no-store'}});
 const fail=(m:string,status=400)=>json({error:m},status);
@@ -64,10 +67,14 @@ async function handler(req:Request,context:{params:Promise<{path:string[]}>}){
  if(method==='GET'&&action==='zip'){
  const shots=all<{image_id:string;plan:string}>("SELECT image_id,plan FROM shots WHERE job_id=? AND image_id IS NOT NULL",id);if(!shots.length)return fail('다운로드 가능한 이미지가 없습니다.');
  const zip=new JSZip();const counts:Record<string,number>={};const fmt=new URL(req.url).searchParams.get('format')==='png'?'png':'jpg';
- for(const s of shots){const type=JSON.parse(s.plan).shot_type;counts[type]=(counts[type]||0)+1;const a=one<Asset>('SELECT * FROM assets WHERE id=?',s.image_id)!;const b=await readFile(a.path);zip.file(`PRODUCT_${id.slice(0,8)}_${type}_${String(counts[type]).padStart(2,'0')}.${fmt}`,fmt==='jpg'?await sharp(b).jpeg({quality:95}).toBuffer():b);}
- return new Response(new Uint8Array(await zip.generateAsync({type:'nodebuffer'})),{headers:{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="HI_ESOL_photoshoot.zip"','Cache-Control':'no-store'}});
+ for(const s of shots){const type=JSON.parse(s.plan).shot_type;counts[type]=(counts[type]||0)+1;const a=one<Asset>('SELECT * FROM assets WHERE id=?',s.image_id)!;const source=fmt==='jpg'?Readable.from((async function*(){yield await sharp(a.path).jpeg({quality:95}).toBuffer();})()):createReadStream(a.path);zip.file(`PRODUCT_${id.slice(0,8)}_${type}_${String(counts[type]).padStart(2,'0')}.${fmt}`,source);}
+ return new Response(Readable.toWeb(zip.generateNodeStream({streamFiles:true}) as Readable) as ReadableStream<Uint8Array>,{headers:{'Content-Type':'application/zip','Content-Disposition':'attachment; filename="HI_ESOL_photoshoot.zip"','Cache-Control':'no-store'}});
  }
  if(method==='GET'){if(!id)return json(all("SELECT jobs.id,jobs.status,jobs.created_at,products.name AS product_name,(SELECT image_id FROM shots WHERE job_id=jobs.id AND image_id IS NOT NULL ORDER BY rowid LIMIT 1) AS thumbnail_id FROM jobs JOIN products ON products.id=jobs.product_id ORDER BY jobs.created_at DESC"));const j=one('SELECT id,product_id,model_id,options,status,error,created_at FROM jobs WHERE id=?',id);if(!j)return fail('작업을 찾을 수 없습니다.',404);return json({...j,analysis:one('SELECT analysis FROM products WHERE id=?',String(j.product_id))?.analysis,shots:all('SELECT * FROM shots WHERE job_id=? ORDER BY rowid',id)});}
+ if(action==='retry-failed'){
+  if(!process.env.OPENAI_API_KEY)return fail('서버에 OPENAI_API_KEY를 설정해 주세요.',503);
+  const count=transaction(()=>{const result=run("UPDATE shots SET status='queued',error=NULL WHERE job_id=? AND status='failed'",id);if(Number(result.changes)>0)run("UPDATE jobs SET status='running',error=NULL WHERE id=?",id);return Number(result.changes);});return json({retried:count});
+ }
  if(action==='retry'){run("UPDATE jobs SET status='queued',error=NULL WHERE id=? AND status='failed'",id);return json({ok:true});}
  const b=z.object({product_id:z.string(),model_id:z.string(),options:optionsSchema,idempotency:z.string().uuid()}).parse(await req.json());
  const old=one('SELECT id FROM jobs WHERE idempotency=?',b.idempotency);if(old)return json(old);

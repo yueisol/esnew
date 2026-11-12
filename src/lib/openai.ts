@@ -5,8 +5,8 @@ import {analysisSchema,type Asset,type Analysis} from './schema';
 export const imageModel=process.env.IMAGE_MODEL||'gpt-image-2.6-sunburst';
 export const visionModel=process.env.VISION_MODEL||'gpt-4.1';
 export class ApiError extends Error{constructor(message:string,public status:number){super(message);}}
-export async function retry<T>(fn:()=>Promise<T>,sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms))):Promise<T>{
- for(let i=0;;i++){try{return await fn();}catch(e){if(!(e instanceof ApiError)||![429,500,502,503,504].includes(e.status)||i>=3)throw e;await sleep(Math.min(30000,1500*2**i)+Math.random()*500);}}
+export async function retry<T>(fn:()=>Promise<T>,sleep=(ms:number)=>new Promise(r=>setTimeout(r,ms)),statuses=[429,500,502,503,504]):Promise<T>{
+ for(let i=0;;i++){try{return await fn();}catch(e){if(!(e instanceof ApiError)||!statuses.includes(e.status)||i>=3)throw e;await sleep(Math.min(30000,1500*2**i)+Math.random()*500);}}
 }
 async function request(endpoint:string,body:BodyInit,json=true,signal=AbortSignal.timeout(600000)){
  if(!process.env.OPENAI_API_KEY)throw new Error('서버에 OPENAI_API_KEY를 설정해 주세요.');
@@ -28,8 +28,17 @@ export function analyze(assets:Asset[]):Promise<Analysis>{return vision('Analyze
 export async function edit(prompt:string,refs:Asset[],square:boolean){
  const form=new FormData();form.set('model',imageModel);form.set('prompt',prompt);form.set('n','1');form.set('size',square?'1024x1024':'1024x1536');form.set('quality','high');form.set('output_format','png');
  if(['gpt-image-1','gpt-image-1.5'].includes(imageModel))form.set('input_fidelity','high');
- for(const a of refs)form.append('image[]',new Blob([new Uint8Array(await readFile(a.path))],{type:a.mime}),a.id+'.png');
- const result=await retry(()=>request('images/edits',form,false));
+ let total=0;
+ for(const a of refs){
+  // Lossless encoding preserves reference resolution and texture while reducing multipart memory.
+  const bytes=await sharp(a.path).webp({lossless:true,effort:2}).toBuffer();total+=bytes.length;
+  if(total>48*1024*1024)throw new Error('참고 이미지의 전송 용량이 너무 큽니다. 중복 참고 사진을 줄여 주세요.');
+  form.append('image[]',new Blob([new Uint8Array(bytes)],{type:'image/webp'}),a.id+'.webp');
+ }
+ const configured=Number(process.env.IMAGE_REQUEST_TIMEOUT_MS);
+ const signal=AbortSignal.timeout(Number.isFinite(configured)&&configured>=1000?Math.min(configured,600000):480000);
+ // One total deadline across rate-limit retries. Unknown outcomes are never resubmitted automatically.
+ const result=await retry(()=>request('images/edits',form,false,signal),undefined,[429]);
  if(!result.data?.[0]?.b64_json)throw new Error('이미지 응답이 비어 있습니다.');
  return Buffer.from(result.data[0].b64_json,'base64');
 }

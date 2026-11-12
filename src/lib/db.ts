@@ -17,6 +17,11 @@ CREATE TABLE IF NOT EXISTS heartbeat(id INTEGER PRIMARY KEY CHECK(id=1),at INTEG
 // Disable the former expiry trigger without dropping existing records or files.
 // Legacy expires_at and pending_deletions metadata are inert and never processed.
 db.exec('DROP TRIGGER IF EXISTS jobs_set_expiry');
+db.exec('BEGIN IMMEDIATE');
+try {
+ if(!(db.prepare('PRAGMA table_info(shots)').all() as {name:string}[]).some(c=>c.name==='started_at'))db.exec('ALTER TABLE shots ADD COLUMN started_at INTEGER');
+ db.exec('COMMIT');
+} catch(e){db.exec('ROLLBACK');throw e;}
 db.prepare('INSERT OR IGNORE INTO models(id,name,profile,prompt) VALUES(?,?,?,?)').run('yoo-isol','유이솔',profile,identity);
 export function all<T=Record<string,unknown>>(sql:string,...args:(string|number|null)[]):T[]{return db.prepare(sql).all(...args) as T[];}
 export function one<T=Record<string,unknown>>(sql:string,...args:(string|number|null)[]):T|undefined{return db.prepare(sql).get(...args) as T|undefined;}

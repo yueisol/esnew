@@ -24,6 +24,12 @@ try{
  await json(`shots/${job.shots[0].id}/approve`,'POST',{});assert.equal((await json('jobs/'+job.id)).shots[0].approved,1);
  const zip=await req('jobs/'+job.id+'/zip');assert.equal(Object.keys((await JSZip.loadAsync(await zip.arrayBuffer())).files).length,10);
  const image=await req('assets/'+job.shots[0].image_id+'?format=jpg');assert.equal(image.headers.get('content-type'),'image/jpeg');assert.equal((await sharp(Buffer.from(await image.arrayBuffer())).metadata()).width,1152);
+ const batchStore=new DatabaseSync(path.join(dir,'studio.sqlite'));
+ const unchanged=job.shots.slice(1).map((s:{image_id:string})=>s.image_id);
+ batchStore.prepare("UPDATE shots SET status='failed',error='test transient failure' WHERE id=?").run(job.shots[0].id);
+ assert.equal((await json('jobs/'+job.id+'/retry-failed','POST',{})).retried,1);
+ assert.equal((await json('jobs/'+job.id+'/retry-failed','POST',{})).retried,0);
+ job=await complete(job.id);assert.deepEqual(job.shots.slice(1).map((s:{image_id:string})=>s.image_id),unchanged);batchStore.close();
  const extended=await json('jobs','POST',{...input,idempotency:crypto.randomUUID(),options:{count:11,ratio:'1:1'}});const extendedJob=await complete(extended.id);assert.equal(extendedJob.shots.length,11);
  worker.kill('SIGTERM');await new Promise(r=>setTimeout(r,1200));assert.equal((await json('jobs/'+job.id)).shots.length,10);
  const archive=await json('jobs');const record=archive.find((r:{id:string})=>r.id===job.id);assert.equal(record.product_name,'테스트 니트');assert.ok(record.thumbnail_id);assert.equal(record.expires_at,undefined);
