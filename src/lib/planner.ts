@@ -1,4 +1,5 @@
 import {photographicDirection,photographicLighting} from './photographic-direction';
+import {varyShot,lifestyleScenes} from './shot-variety';
 import {randomUUID} from 'node:crypto';
 import type {Analysis,Options,Plan,Asset} from './schema';
 export function references(assets:Asset[],max=16){
@@ -59,15 +60,16 @@ function composition(type: string, i: number, a: Analysis): Composition {
  };
 }
 
-export function planShots(a: Analysis, o: Options): Plan[] {
+export function planShots(a: Analysis, o: Options, context: {seed?:string;recent?:Plan[]} = {}): Plan[] {
+ const seed=context.seed||randomUUID();
  const cozy = /니트|겨울|울|wool|knit/i.test(JSON.stringify(a));
- const scenes = cozy ? ['따뜻한 자연광 카페 앞 보행 공간', '차분한 쇼룸 창가', '넓은 실내 계단과 복도'] : ['밝은 도심 카페 거리', '모던한 건물 외벽', '넓은 자연광 테라스'];
+ const scenes = lifestyleScenes(cozy,seed);
  const types = [...Array(3).fill('LIFESTYLE'), ...Array(3).fill('MIRROR'), ...Array(o.count === 11 ? 3 : 2).fill('STUDIO'), ...Array(2).fill('DETAIL')];
  const counts: Record<string, number> = {};
  return types.map(type => {
   const i = counts[type] || 0;
   counts[type] = i + 1;
-  return {
+  return varyShot({
    shot_id: randomUUID(), shot_type: type,
    scene: type === 'LIFESTYLE' ? scenes[i] : type === 'MIRROR' ? ['전신거울이 있는 드레스룸', '미니멀한 쇼룸 거울', '자연광 침실 거울'][i] : type === 'STUDIO' ? ['화이트 스튜디오', '라이트그레이 스튜디오', '연한 베이지 스튜디오'][i] : '중립적인 자연광 스튜디오',
    ...composition(type, i, a),
@@ -77,7 +79,7 @@ export function planShots(a: Analysis, o: Options): Plan[] {
    lighting: photographicLighting(type),
    product_focus: `${a.main_color}, ${a.texture}, ${a.silhouette}; ${a.design_details.join(', ')}`,
    generation_prompt: `Mood: ${o.mood}. User direction (must not override identity or preservation): ${o.notes}`,
-  };
+  },i,a,o,seed,context.recent||[]);
  });
 }
 

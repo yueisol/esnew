@@ -31,6 +31,7 @@ try{
  assert.equal((await json('jobs/'+job.id+'/retry-failed','POST',{})).retried,0);
  job=await complete(job.id);assert.deepEqual(job.shots.slice(1).map((s:{image_id:string})=>s.image_id),unchanged);batchStore.close();
  const extended=await json('jobs','POST',{...input,idempotency:crypto.randomUUID(),options:{count:11,ratio:'1:1'}});const extendedJob=await complete(extended.id);assert.equal(extendedJob.shots.length,11);
+ const originalVariants=new Map(job.shots.map((s:{plan:string})=>{const p=JSON.parse(s.plan);return [p.variation_id.split(':')[0],p.variation_id];}));for(const s of extendedJob.shots){const p=JSON.parse(s.plan);const previous=originalVariants.get(p.variation_id.split(':')[0]);if(previous)assert.notEqual(p.variation_id,previous,'Worker must consider previous shoot history');}
  worker.kill('SIGTERM');await new Promise(r=>setTimeout(r,1200));assert.equal((await json('jobs/'+job.id)).shots.length,10);
  const archive=await json('jobs');const record=archive.find((r:{id:string})=>r.id===job.id);assert.equal(record.product_name,'테스트 니트');assert.ok(record.thumbnail_id);assert.equal(record.expires_at,undefined);
  const store=new DatabaseSync(path.join(dir,'studio.sqlite'));

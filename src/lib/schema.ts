@@ -8,4 +8,4 @@ export const profile='유이솔 (Yoo Isol), 가상 성인 여성 모델, 21세, 
 export const identity='Use the exact same adult fictional woman from the identity references. Preserve face contour, eye shape and spacing, nose, lips, skin tone, shoulder proportions, waist and hip proportions. Hair, expression and scene may vary; identity must not.';
 export const roles=['reference','face','body','cutout','mannequin','detail'] as const;
 export type Asset={id:string;owner_id:string;role:typeof roles[number];filename:string;path:string;mime:string};
-export type Plan={shot_id:string;shot_type:string;scene:string;pose:string;expression:string;hairstyle:string;styling:string;camera_angle:string;framing:string;lighting:string;product_focus:string;generation_prompt:string};
+export type Plan={variation_id?:string;shot_id:string;shot_type:string;scene:string;pose:string;expression:string;hairstyle:string;styling:string;camera_angle:string;framing:string;lighting:string;product_focus:string;generation_prompt:string};

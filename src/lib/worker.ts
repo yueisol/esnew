@@ -31,7 +31,8 @@ async function prepare(job:Job){try{
  const analysis=product.analysis?JSON.parse(product.analysis):await analyze(snap.assets.filter(a=>['cutout','mannequin','detail'].includes(a.role)));
  run('UPDATE products SET analysis=? WHERE id=?',JSON.stringify(analysis),job.product_id);
  run("UPDATE jobs SET status='planning' WHERE id=?",job.id);
- const plans=planShots(analysis,JSON.parse(job.options));
+ const recent=all<{plan:string}>("SELECT shots.plan FROM shots JOIN jobs ON jobs.id=shots.job_id WHERE jobs.model_id=? AND jobs.id<>? ORDER BY jobs.created_at DESC,jobs.rowid DESC,shots.rowid ASC LIMIT 110",job.model_id,job.id).flatMap(row=>{try{const p=JSON.parse(row.plan);return p&&typeof p==='object'?[p as Plan]:[];}catch{return [];}});
+ const plans=planShots(analysis,JSON.parse(job.options),{seed:job.id,recent});
  transaction(()=>{for(const plan of plans)run('INSERT INTO shots(id,job_id,plan) VALUES(?,?,?)',plan.shot_id,job.id,JSON.stringify(plan));run("UPDATE jobs SET status='running' WHERE id=?",job.id);});
  }catch(e){run("UPDATE jobs SET status='failed',error=? WHERE id=?",message(e),job.id);}}
 function message(e:unknown){return e instanceof Error?e.message.slice(0,500):'작업 오류';}

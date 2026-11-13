@@ -47,3 +47,41 @@ test('new and saved plans receive photographic rendering and grain-aware inspect
  const plans=planShots(analysis,optionsSchema.parse({}));
  for(const p of plans){const text=prompt({profile:'same model',prompt:'preserve face'},analysis,{...p,lighting:'Legacy lighting'},[]);assert.match(text,/PHOTOGRAPHIC RENDERING/);assert.match(text,/faithful product color/);assert.match(text,/No CGI gloss/);assert.match(reviewInstruction(p),/grain is intentional/);}
 });
+test('new shoots avoid the previous pose in each slot and balance recent selections',()=>{
+ let recent:ReturnType<typeof planShots>=[];let previous:ReturnType<typeof planShots>=[];
+ const seen=new Map<string,Set<string>>();
+ for(let n=0;n<12;n++){
+  const plans=planShots(analysis,optionsSchema.parse({count:11}),{seed:'shoot-'+n,recent});
+  for(const [i,p] of plans.entries()){
+   assert.ok(p.variation_id);
+   if(previous.length){assert.notEqual(p.variation_id,previous[i].variation_id);assert.notEqual(p.pose,previous[i].pose);}
+   const slot=p.variation_id!.split(':')[0];const choices=seen.get(slot)||new Set<string>();choices.add(p.variation_id!);seen.set(slot,choices);
+   // First four shoots use different action variants, not only different backgrounds or shot IDs.
+   if(n<4)assert.equal(choices.size,n+1);
+  }
+  previous=plans;recent=[...plans,...recent].slice(0,110);
+ }
+ assert.ok([...seen.values()].every(s=>s.size>=4));
+});
+test('same job seed yields stable plan content while different jobs vary framing and actions',()=>{
+ const options=optionsSchema.parse({hair:'긴 생머리',notes:'미니멀한 코디'});
+ const withoutIds=(plans:ReturnType<typeof planShots>)=>plans.map(({shot_id,...p})=>p);
+ const first=planShots(analysis,options,{seed:'one'}),again=planShots(analysis,options,{seed:'one'});
+ assert.deepEqual(withoutIds(first),withoutIds(again));
+ const second=planShots(analysis,options,{seed:'two',recent:first});
+ assert.ok(second.every((p,i)=>p.pose!==first[i].pose));
+ assert.ok(second.some((p,i)=>p.camera_angle!==first[i].camera_angle||p.framing!==first[i].framing));
+ assert.ok(second.every(p=>p.hairstyle==='긴 생머리'&&p.generation_prompt.includes('미니멀한 코디')));
+ assert.ok(second.every(p=>p.generation_prompt.includes('Do not copy the pose')));
+});
+test('category coverage and legacy plans remain compatible with variation',()=>{
+ const old=planShots(analysis,optionsSchema.parse({}),{seed:'old'}).map(({variation_id,...p})=>p);
+ for(const category of ['BOTTOM','DRESS'] as const){
+  for(let i=0;i<20;i++){
+   const plans=planShots({...analysis,category},optionsSchema.parse({}),{seed:String(i),recent:old});
+   const middle=plans.filter(p=>p.shot_type==='LIFESTYLE')[1];
+   assert.doesNotMatch(middle.pose,/앉|걸터/);assert.match(middle.framing,/Full-length/);
+   assert.match(plans.filter(p=>p.shot_type==='MIRROR')[0].framing,/entire head, both feet and both shoes/);
+  }
+ }
+});
