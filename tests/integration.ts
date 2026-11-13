@@ -19,10 +19,10 @@ try{
  worker=spawn('node',['--import','tsx','tests/mock-worker.ts'],{env,stdio:'pipe'});worker.stderr?.on('data',d=>process.stderr.write(d));
  async function complete(id:string){for(let i=0;i<120;i++){const j=await json('jobs/'+id);if(j.status==='done')return j;if(j.status==='failed'||j.status==='partial')throw new Error(JSON.stringify(j));await new Promise(r=>setTimeout(r,250));}throw new Error('Timed out');}
  let advanced=false;for(let i=0;i<35;i++){const pending=await json('jobs/'+jobs[0].id);if(pending.shots.filter((s:{image_id:string|null})=>s.image_id).length>=3){assert.equal(pending.shots.filter((s:{status:string})=>s.status==='done').length,0);advanced=true;break;}await new Promise(r=>setTimeout(r,200));}assert.ok(advanced,'Generation must progress past the first pair while review is still delayed');
- let job=await complete(jobs[0].id);assert.equal(job.shots.length,10);assert.ok(job.shots.every((s:{status:string})=>s.status==='done'));
+ let job=await complete(jobs[0].id);assert.equal(job.shots.length,11);assert.equal(JSON.parse(job.options).count,11);assert.ok(job.shots.every((s:{status:string})=>s.status==='done'));
  const oldIds=job.shots.map((s:{image_id:string})=>s.image_id);await json(`shots/${job.shots[0].id}/retry`,'POST',{feedback:'손 수정'});job=await complete(job.id);assert.notEqual(job.shots[0].image_id,oldIds[0]);assert.deepEqual(job.shots.slice(1).map((s:{image_id:string})=>s.image_id),oldIds.slice(1));
  await json(`shots/${job.shots[0].id}/approve`,'POST',{});assert.equal((await json('jobs/'+job.id)).shots[0].approved,1);
- const zip=await req('jobs/'+job.id+'/zip');assert.equal(Object.keys((await JSZip.loadAsync(await zip.arrayBuffer())).files).length,10);
+ const zip=await req('jobs/'+job.id+'/zip');assert.equal(Object.keys((await JSZip.loadAsync(await zip.arrayBuffer())).files).length,11);
  const image=await req('assets/'+job.shots[0].image_id+'?format=jpg');assert.equal(image.headers.get('content-type'),'image/jpeg');assert.equal((await sharp(Buffer.from(await image.arrayBuffer())).metadata()).width,1152);
  const batchStore=new DatabaseSync(path.join(dir,'studio.sqlite'));
  const unchanged=job.shots.slice(1).map((s:{image_id:string})=>s.image_id);
@@ -32,7 +32,7 @@ try{
  job=await complete(job.id);assert.deepEqual(job.shots.slice(1).map((s:{image_id:string})=>s.image_id),unchanged);batchStore.close();
  const extended=await json('jobs','POST',{...input,idempotency:crypto.randomUUID(),options:{count:11,ratio:'1:1'}});const extendedJob=await complete(extended.id);assert.equal(extendedJob.shots.length,11);
  const originalVariants=new Map(job.shots.map((s:{plan:string})=>{const p=JSON.parse(s.plan);return [p.variation_id.split(':')[0],p.variation_id];}));for(const s of extendedJob.shots){const p=JSON.parse(s.plan);const previous=originalVariants.get(p.variation_id.split(':')[0]);if(previous)assert.notEqual(p.variation_id,previous,'Worker must consider previous shoot history');}
- worker.kill('SIGTERM');await new Promise(r=>setTimeout(r,1200));assert.equal((await json('jobs/'+job.id)).shots.length,10);
+ worker.kill('SIGTERM');await new Promise(r=>setTimeout(r,1200));assert.equal((await json('jobs/'+job.id)).shots.length,11);
  const archive=await json('jobs');const record=archive.find((r:{id:string})=>r.id===job.id);assert.equal(record.product_name,'테스트 니트');assert.ok(record.thumbnail_id);assert.equal(record.expires_at,undefined);
  const store=new DatabaseSync(path.join(dir,'studio.sqlite'));
  store.exec('ALTER TABLE jobs ADD COLUMN expires_at INTEGER');
@@ -47,12 +47,17 @@ try{
  assert.ok((await json('jobs')).some((r:{id:string})=>r.id===job.id));
  assert.equal((await req('jobs/not-a-job')).status,404);
  assert.equal((await req('jobs/not-a-job/zip')).status,404);
+ // Simulate an already planned legacy 10-shot job: retries must not add a new studio cut.
+ const thirdStudio=job.shots.filter((s:{plan:string})=>JSON.parse(s.plan).shot_type==='STUDIO')[2];
+ store.prepare('DELETE FROM shots WHERE id=?').run(thirdStudio.id);
+ store.prepare('UPDATE jobs SET options=? WHERE id=?').run(JSON.stringify({...JSON.parse(job.options),count:10}),job.id);
+ const legacyPlans=(await json('jobs/'+job.id)).shots.map((s:{plan:string})=>s.plan);
  assert.equal((await req('shots/'+job.shots[0].id+'/retry','POST',{})).status,200);
  worker=spawn('node',['--import','tsx','tests/mock-worker.ts'],{env,stdio:'pipe'});
- const resumed=await complete(job.id);assert.equal(resumed.shots.length,10);
+ const resumed=await complete(job.id);assert.equal(resumed.shots.length,10);assert.deepEqual(resumed.shots.map((s:{plan:string})=>s.plan),legacyPlans);
  assert.notEqual(resumed.shots[0].image_id,job.shots[0].image_id);
  await access(retainedPath);
  assert.ok(store.prepare('SELECT id FROM products WHERE id=?').get(pid));
  assert.equal((await json('jobs/'+extended.id)).shots.length,11);store.close();
- console.log('PASS: authenticated uploads, MIME decoding, duplicate job protection, 10/11-shot mocked worker, single regeneration isolation, approval, ZIP/JPEG, persistent job recovery, archive metadata, legacy-expired job access and regeneration, no restart deletion.');
+ console.log('PASS: authenticated uploads, MIME decoding, duplicate job protection, 11-shot mocked worker with legacy count normalization, single regeneration isolation, approval, ZIP/JPEG, persistent job recovery, archive metadata, legacy-expired job access and regeneration, no restart deletion.');
 }catch(e){console.error(e);process.exitCode=1;}finally{worker?.kill('SIGTERM');web.kill('SIGTERM');}

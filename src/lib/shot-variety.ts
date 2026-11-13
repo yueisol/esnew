@@ -52,11 +52,11 @@ const variants:Record<string,Variant[]>={
  ],
  STUDIO_0:[
   {pose:'정면으로 서서 한 발만 반 걸음 앞으로 두고 팔을 자연스럽게 내리기'},
-  {pose:'정면으로 서서 양발을 골반 너비로 벌리고 시선만 카메라 옆으로 두기'},
+  {pose:'정면으로 서서 양발을 골반 너비로 벌리고 양팔을 편하게 내리기'},
   {pose:'정면을 유지한 채 발목만 느슨하게 교차하고 어깨를 편안히 내리기'},
-  {pose:'정면으로 한 발에 체중을 싣고 한 손끝만 몸 옆 의자 등받이에 대기',setting:'몸 옆에 놓인 미니멀한 의자'},
-  {pose:'정면으로 짧게 걷다 멈춘 순간, 팔은 자연스럽게 비대칭 위치 유지'},
-  {pose:'정면으로 서서 한 손만 귀 옆 잔머리를 정리하고 다른 팔은 내리기'},
+  {pose:'정면으로 한쪽 다리에 체중을 싣되 골반과 어깨는 카메라와 평행하게 유지하기'},
+  {pose:'정면으로 서서 한쪽 무릎만 부드럽게 이완하고 양손은 허벅지 바깥에 내리기'},
+  {pose:'정면으로 서서 한 발끝만 옆으로 살짝 두고 팔은 몸 옆에서 편안하게 펴기'},
  ],
  STUDIO_1:[
   {pose:'몸통과 골반을 정확한 측면으로 두고 한 발만 앞으로 뻗어 정지하기'},
@@ -67,12 +67,12 @@ const variants:Record<string,Variant[]>={
   {pose:'정확한 측면으로 짧게 한 걸음 내딛고 팔은 몸통 디자인을 가리지 않게 자연스럽게 움직이기'},
  ],
  STUDIO_2:[
-  {pose:'정후면으로 서서 양발을 편안한 간격으로 벌리고 팔은 옆으로 내리기'},
-  {pose:'정후면을 유지하며 한 발을 반 걸음 앞으로 두기, 뒤돌아보지 않기'},
-  {pose:'정후면으로 한쪽 다리에 체중을 싣고 반대 발끝을 옆으로 두기'},
-  {pose:'정후면으로 천천히 걷다 멈추고 양팔을 자연스럽게 비대칭으로 내리기'},
-  {pose:'정후면으로 서서 한 손만 몸 옆 의자에 가볍게 대기',setting:'몸 옆에 낮은 스툴'},
-  {pose:'정후면으로 발목을 느슨하게 교차하고 머리는 진행 방향 그대로 유지하기'},
+  {pose:'사선으로 뒷다리에 체중을 싣고 앞다리를 길게 뻗어 비대칭 라인을 만들며 한 손만 귀 옆에 올리는 모델 화보 포즈'},
+  {pose:'사선으로 선 채 한 발을 옆으로 길게 두고 한 손끝은 몸 바깥 의자 등받이에 얹어 어깨와 팔의 비대칭 라인을 만드는 화보 포즈',setting:'모델 옆에 놓인 미니멀한 의자'},
+  {pose:'사선 워킹 중 앞발이 바닥에 닿는 순간을 멈춰 다리와 양팔이 서로 다른 대각선을 이루는 런웨이 화보 포즈'},
+  {pose:'사선으로 한 발을 낮은 단에 올리고 반대쪽 팔을 몸 바깥으로 부드럽게 벌려 여유 있는 선을 만드는 화보 포즈',setting:'신발 높이 정도의 낮은 촬영용 단'},
+  {pose:'스툴 끝에 사선으로 앉아 상체를 길게 세우고 한 다리는 앞으로 뻗고 한 손은 옆 좌면에 두어 비대칭 실루엣을 만드는 화보 포즈',setting:'팔걸이 없는 낮은 촬영용 스툴',seated:true},
+  {pose:'넓은 벤치 끝에 사선으로 앉아 한 다리는 옆으로 뻗고 한 손은 귀 옆으로 올려 어깨와 팔에 서로 다른 선을 만드는 화보 포즈',setting:'단순한 촬영용 벤치',seated:true},
  ],
  DETAIL_0:[
   {pose:'착용 모델이 편안히 서서 구조적 디테일을 정면으로 드러내고 팔은 화면 밖으로 내리기'},
@@ -97,16 +97,17 @@ export function varyShot(plan:Plan,index:number,a:Analysis,o:Options,seed:string
  const frequency=(id:string)=>recent.filter(p=>p.variation_id===id).length;
  const selected=eligible.sort((a,b)=>frequency(a.id)-frequency(b.id)||rank(seed,a.id)-rank(seed,b.id))[0];
  const detail=plan.shot_type==='DETAIL';
- const height=plan.shot_type==='MIRROR'?'face level beside the face':pick(['eye level','upper-chest level with a level horizon','slightly below eye level, with parallel vertical lines'],seed,slot+'height');
- const placement=pick(detail?['Center the selected seam or structure in the close crop.','Place the selected seam diagonally across the close crop; keep all texture in focus.']:['Place the model slightly left of centre with usable scene space on the right.','Place the model slightly right of centre with usable scene space on the left.','Use a balanced central placement with breathing room on both sides.'],seed,slot+'placement');
+ const studioFront=plan.shot_type==='STUDIO'&&index===0;
+ const height=studioFront?'eye level':plan.shot_type==='MIRROR'?'face level beside the face':pick(['eye level','upper-chest level with a level horizon','slightly below eye level, with parallel vertical lines'],seed,slot+'height');
+ const placement=studioFront?'Use a balanced central placement with breathing room on both sides.':pick(detail?['Center the selected seam or structure in the close crop.','Place the selected seam diagonally across the close crop; keep all texture in focus.']:['Place the model slightly left of centre with usable scene space on the right.','Place the model slightly right of centre with usable scene space on the left.','Use a balanced central placement with breathing room on both sides.'],seed,slot+'placement');
  const direction=pick(['left','right'],seed,slot+'side');
  let camera=plan.camera_angle;
  if(!detail){camera=camera.replace(/natural eye-level camera|environmental eye-level camera/g,`camera at ${height}`);camera+=` Camera height: ${height}. Keep the specified body rotation; no extreme high/low angle or wide-angle distortion.`;if((index>0&&plan.shot_type==='STUDIO'&&index!==2)||plan.shot_type==='LIFESTYLE'||(plan.shot_type==='MIRROR'&&index===1))camera+=` Photograph the model's ${direction} side while preserving the specified front/rear/side orientation.`;}
- const pose=selected.pose+(plan.shot_type==='MIRROR'?` 스마트폰은 얼굴 옆에 들고 상품을 가리지 않기.${index<2?' 얼굴 전체 노출.':''}`:'');
+ const pose=selected.pose+(studioFront?' 얼굴·어깨·골반은 정면, 카메라 렌즈를 시크하게 응시하기.':'')+(plan.shot_type==='MIRROR'?` 스마트폰은 얼굴 옆에 들고 상품을 가리지 않기.${index<2?' 얼굴 전체 노출.':''}`:'');
  return {...plan,variation_id:selected.id,pose,scene:plan.scene+(selected.setting?` · ${selected.setting}`:''),camera_angle:camera,framing:plan.framing+' '+placement,
-  expression:plan.expression.includes('얼굴 노출 불필요')?plan.expression:pick(['은은한 미소, 턱과 눈에 힘을 빼기','입술을 편안히 둔 차분한 표정','시선을 카메라 살짝 옆에 둔 자연스러운 표정','미소가 막 사라지는 순간의 편안한 표정'],seed,slot+'expression'),
+  expression:studioFront||plan.expression.includes('얼굴 노출 불필요')?plan.expression:pick(['은은한 미소, 턱과 눈에 힘을 빼기','입술을 편안히 둔 차분한 표정','시선을 카메라 살짝 옆에 둔 자연스러운 표정','미소가 막 사라지는 순간의 편안한 표정'],seed,slot+'expression'),
   hairstyle:o.hair==='자동 추천'?pick(['귀 뒤로 넘긴 긴 생머리','로우 포니테일','하프업','느슨하게 묶은 머리'],seed,slot+'hair'):o.hair,
-  generation_prompt:plan.generation_prompt+' Follow this specific physical action and composition instead of defaulting to a centered standing portrait. Do not copy the pose or camera crop from the identity reference images. Keep hands and props clear of the garment, preserve fit and all mandatory coverage. For detail crops, apply only actions relevant to the product region; do not bring excluded face or body parts into view.',
+  generation_prompt:plan.generation_prompt+' Follow this specific physical action and composition. Use a centered straight standing portrait only when explicitly required by the shot plan. Do not copy the pose or camera crop from the identity reference images. Keep hands and props clear of the garment, preserve fit and all mandatory coverage. For detail crops, apply only actions relevant to the product region; do not bring excluded face or body parts into view.',
  };
 }
 export function lifestyleScenes(cozy:boolean,seed:string):string[]{

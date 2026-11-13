@@ -3,6 +3,7 @@ import {all,one,run,transaction} from './db';
 import {checkpointResult,finishResult,hasCheckpoint} from './generation-result';
 import {analyze,edit,vision,reviewSchema} from './openai';
 import {references,planShots,prompt,reviewInstruction} from './planner';
+import {optionsSchema} from './schema';
 import type {Asset,Analysis,Options,Plan} from './schema';
 type Job={id:string;product_id:string;model_id:string;options:string;status:string;snapshot:string};
 type Shot={id:string;job_id:string;plan:string;status:string;image_id:string|null;feedback:string;revision:number};
@@ -32,8 +33,9 @@ async function prepare(job:Job){try{
  run('UPDATE products SET analysis=? WHERE id=?',JSON.stringify(analysis),job.product_id);
  run("UPDATE jobs SET status='planning' WHERE id=?",job.id);
  const recent=all<{plan:string}>("SELECT shots.plan FROM shots JOIN jobs ON jobs.id=shots.job_id WHERE jobs.model_id=? AND jobs.id<>? ORDER BY jobs.created_at DESC,jobs.rowid DESC,shots.rowid ASC LIMIT 110",job.model_id,job.id).flatMap(row=>{try{const p=JSON.parse(row.plan);return p&&typeof p==='object'?[p as Plan]:[];}catch{return [];}});
- const plans=planShots(analysis,JSON.parse(job.options),{seed:job.id,recent});
- transaction(()=>{for(const plan of plans)run('INSERT INTO shots(id,job_id,plan) VALUES(?,?,?)',plan.shot_id,job.id,JSON.stringify(plan));run("UPDATE jobs SET status='running' WHERE id=?",job.id);});
+ const options=optionsSchema.parse(JSON.parse(job.options));
+ const plans=planShots(analysis,options,{seed:job.id,recent});
+ transaction(()=>{for(const plan of plans)run('INSERT INTO shots(id,job_id,plan) VALUES(?,?,?)',plan.shot_id,job.id,JSON.stringify(plan));run("UPDATE jobs SET status='running',options=? WHERE id=?",JSON.stringify(options),job.id);});
  }catch(e){run("UPDATE jobs SET status='failed',error=? WHERE id=?",message(e),job.id);}}
 function message(e:unknown){return e instanceof Error?e.message.slice(0,500):'작업 오류';}
 async function work(shot:Shot){

@@ -54,9 +54,9 @@ function composition(type: string, i: number, a: Analysis): Composition {
   };
  }
  return {
-  pose: ['정면으로 편안하게 서서 상품 전체 핏 보여주기', '몸과 골반을 카메라에 정확히 옆으로 두고 자연스럽게 서기', '카메라에 등을 보이고 편안하게 서서 후면 실루엣 보여주기'][i],
-  camera_angle: ['Straight front view, natural eye-level camera', 'True 90-degree side profile of torso and hips. Keep both shoulders aligned in profile; do not rotate torso into front or three-quarter view', 'Straight rear view, body rotated 180 degrees away from camera; no looking back'][i],
-  framing: `${a.category === 'TOP' ? 'Head to below hips with comfortable margins, entire top visible.' : 'Full-length photograph including entire garment hem and shoes.'} ${product} ${i > 0 ? 'Face visibility is optional; preserve the required garment orientation instead of forcing a frontal face. Keep hair clear of garment construction.' : ''}`,
+  pose: ['얼굴·어깨·골반을 정면으로 두고 카메라 렌즈를 시크하게 응시하며 서기', '몸과 골반을 카메라에 정확히 옆으로 두고 자연스럽게 서기', '사선으로 체중을 옮겨 비대칭 실루엣을 만드는 모델 화보 포즈'][i],
+  camera_angle: ['Straight front view at eye level. Face, shoulders and hips square to camera; direct eye contact with the lens. No head turn or off-camera gaze', 'True 90-degree side profile of torso and hips. Keep both shoulders aligned in profile; do not rotate torso into front or three-quarter view', 'Editorial front three-quarter view, torso rotated 30–45 degrees. Capture a deliberate asymmetric fashion-model pose, distinct from the straight front and side standing shots. No rear view'][i],
+  framing: `${i === 2 || a.category !== 'TOP' ? 'Full-length photograph including entire garment hem and shoes, with breathing room for the editorial silhouette.' : 'Head to below hips with comfortable margins, entire top visible.'} ${product} ${i === 1 ? 'Face visibility is optional; preserve the required garment orientation instead of forcing a frontal face. Keep hair clear of garment construction.' : 'Keep the face visible and the sales product unobstructed.'}`,
  };
 }
 
@@ -64,7 +64,8 @@ export function planShots(a: Analysis, o: Options, context: {seed?:string;recent
  const seed=context.seed||randomUUID();
  const cozy = /니트|겨울|울|wool|knit/i.test(JSON.stringify(a));
  const scenes = lifestyleScenes(cozy,seed);
- const types = [...Array(3).fill('LIFESTYLE'), ...Array(3).fill('MIRROR'), ...Array(o.count === 11 ? 3 : 2).fill('STUDIO'), ...Array(2).fill('DETAIL')];
+ // New plans always include the three fixed studio roles, including queued legacy requests.
+ const types = [...Array(3).fill('LIFESTYLE'), ...Array(3).fill('MIRROR'), ...Array(3).fill('STUDIO'), ...Array(2).fill('DETAIL')];
  const counts: Record<string, number> = {};
  return types.map(type => {
   const i = counts[type] || 0;
@@ -73,18 +74,18 @@ export function planShots(a: Analysis, o: Options, context: {seed?:string;recent
    shot_id: randomUUID(), shot_type: type,
    scene: type === 'LIFESTYLE' ? scenes[i] : type === 'MIRROR' ? ['전신거울이 있는 드레스룸', '미니멀한 쇼룸 거울', '자연광 침실 거울'][i] : type === 'STUDIO' ? ['화이트 스튜디오', '라이트그레이 스튜디오', '연한 베이지 스튜디오'][i] : '중립적인 자연광 스튜디오',
    ...composition(type, i, a),
-   expression: type === 'DETAIL' || (type === 'LIFESTYLE' && i === 2) || (type === 'STUDIO' && i > 0) ? '얼굴 노출 불필요, 지정된 상품 촬영 방향 우선' : ['차분하고 자연스러운 표정', '은은한 미소', '편안하고 시크한 표정'][i % 3],
+   expression: type === 'STUDIO' && i === 0 ? '카메라 렌즈를 정면으로 응시하는 시크하고 담담한 표정, 입술은 편안하게 닫고 웃지 않기' : type === 'DETAIL' || (type === 'LIFESTYLE' && i === 2) || (type === 'STUDIO' && i === 1) ? '얼굴 노출 불필요, 지정된 상품 촬영 방향 우선' : ['차분하고 자연스러운 표정', '은은한 미소', '편안하고 시크한 표정'][i % 3],
    hairstyle: o.hair === '자동 추천' ? ['귀 뒤로 넘긴 긴 생머리', '로우 포니테일', '하프업'][i % 3] : o.hair,
    styling: `${a.styling_recommendations[i % Math.max(1, a.styling_recommendations.length)] || '상품을 가리지 않는 무지의 미니멀 코디'}. Keep the sales garment completely unobstructed. No layered vest, jacket, scarf, bag strap or hair over its important design. For detail images, no accessories in the close-up region.`,
    lighting: photographicLighting(type),
    product_focus: `${a.main_color}, ${a.texture}, ${a.silhouette}; ${a.design_details.join(', ')}`,
-   generation_prompt: `Mood: ${o.mood}. User direction (must not override identity or preservation): ${o.notes}`,
+   generation_prompt: `Mood: ${o.mood}. User direction (must not override identity or preservation): ${o.notes}${type === 'STUDIO' ? ` MANDATORY STUDIO ROLE ${i + 1}/3: ${['Chic straight front portrait: face, shoulders and hips face the camera, eyes look directly into the lens, calm unsmiling expression. No side gaze, smile or turned head, even for a lovely/casual mood.', 'True side profile: keep torso and hips at 90 degrees to camera; do not turn toward camera to show the face.', 'Fashion editorial: deliberate asymmetric model pose in front three-quarter view, with visible weight shift and varied arm/leg lines; never a rear view or another ordinary straight standing portrait.'][i]} This fixed role takes priority over mood or conflicting general directions.` : ''}`,
   },i,a,o,seed,context.recent||[]);
  });
 }
 
 export function reviewInstruction(plan: Plan): string {
- return `Quality check. Compare last generated image against model face/body and garment references. Earlier result images are other shots; check excessive similarity. Check garment preservation, anatomy, mirror physics and visibility. Evaluate camera direction, framing, subject scale and crop against this EXACT plan: ${JSON.stringify(plan)}. Treat a frontal substitute for a side/rear view, a tightly filled portrait instead of a wide environmental shot, cropped feet in the full-body mirror shot, or a portrait instead of a garment detail close-up as shot_compliance issues and set passed=false. Identity consistency does NOT require a visible face: intentionally hidden faces in side/rear views or face-free detail crops are valid. For those shots, record face consistency as not assessable for this planned view, not as an error by itself. For detail shots, partial garment/body visibility is intentional. Check for waxy skin, plastic-looking cloth, implausible lighting, excessive bokeh or harsh sharpening. Very faint monochrome photographic grain is intentional, not a defect by itself; flag it only if it obscures garment detail or creates visible artifacts. Give Korean issues and mark other uncertainties honestly.`;
+ return `Quality check. Compare last generated image against model face/body and garment references. Earlier result images are other shots; check excessive similarity. Check garment preservation, anatomy, mirror physics and visibility. Evaluate camera direction, framing, subject scale and crop against this EXACT plan: ${JSON.stringify(plan)}. Treat a frontal substitute for a side/rear view, a tightly filled portrait instead of a wide environmental shot, cropped feet in the full-body mirror shot, or a portrait instead of a garment detail close-up, an off-camera gaze or smile instead of the chic direct-gaze studio front, or ordinary standing/rear view instead of the planned studio editorial pose as shot_compliance issues and set passed=false. Identity consistency does NOT require a visible face: intentionally hidden faces in side/rear views or face-free detail crops are valid. For those shots, record face consistency as not assessable for this planned view, not as an error by itself. For detail shots, partial garment/body visibility is intentional. Check for waxy skin, plastic-looking cloth, implausible lighting, excessive bokeh or harsh sharpening. Very faint monochrome photographic grain is intentional, not a defect by itself; flag it only if it obscures garment detail or creates visible artifacts. Give Korean issues and mark other uncertainties honestly.`;
 }
 
 export function prompt(model:{profile:string;prompt:string},a:Analysis,p:Plan,refs:Asset[],feedback=''){

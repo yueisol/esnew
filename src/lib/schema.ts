@@ -1,5 +1,5 @@
 import { z } from 'zod';
-export const optionsSchema=z.object({count:z.union([z.literal(10),z.literal(11)]).default(10),ratio:z.enum(['3:4','4:5','1:1']).default('3:4'),mood:z.enum(['자동 추천','내추럴','시크','미니멀','러블리','캐주얼']).default('자동 추천'),hair:z.enum(['자동 추천','긴 생머리','웨이브','묶음머리']).default('자동 추천'),notes:z.string().max(2000).default('')});
+export const optionsSchema=z.object({count:z.union([z.literal(10),z.literal(11)]).default(11).transform(()=>11 as const),ratio:z.enum(['3:4','4:5','1:1']).default('3:4'),mood:z.enum(['자동 추천','내추럴','시크','미니멀','러블리','캐주얼']).default('자동 추천'),hair:z.enum(['자동 추천','긴 생머리','웨이브','묶음머리']).default('자동 추천'),notes:z.string().max(2000).default('')});
 export type Options=z.infer<typeof optionsSchema>;
 const field=z.string();
 export const analysisSchema=z.object({category:z.enum(['TOP','BOTTOM','DRESS','OUTER','SET','OTHER']),subcategory:field,main_color:field,secondary_color:field,pattern:field,material:field,texture:field,fit:field,silhouette:field,neckline:field,shoulder_structure:field,sleeve_length:field,garment_length:field,waistline:field,hemline:field,fastening:field,design_details:z.array(field),unique_features:z.array(field),styling_recommendations:z.array(field),visual_uncertainties:z.array(field)});
